@@ -57,6 +57,15 @@ fake, mapping = ob.anonymize(text)     # 假名版文字、對照表
 original = restore(ai_reply, mapping)  # AI 回覆換回原文
 ```
 
+同一案件有多份文件時，每份文件建一個新的 `Obfuscator`，把上一份回傳的對照表傳進去（跟指令列的 `--map` 相同）；不要拿同一個 `Obfuscator` 連續處理多份文件。
+
+```python
+det = Detector()
+mapping = None
+for text in texts:
+    fake, mapping = Obfuscator(det, mapping=mapping).anonymize(text)  # 還原這份文件的 AI 回覆時，用這次回傳的 mapping
+```
+
 只要偵測、不替換：`Detector().detect(text)` 回傳每個值的位置、類型與分數。
 
 ### 離線使用
@@ -91,6 +100,7 @@ original = restore(ai_reply, mapping)  # AI 回覆換回原文
 - 很長的網址（超過約 220 字）有時整段抓不到。
 - 同一案件共用對照表（`--map`）時，如果前一份文件的假名剛好是後一份文件裡的真名，這個人在後面文件裡的假名或稱呼可能前後不一致；還原時請用各份文件自己的對照表。
 - 上市櫃公司的簡稱比全名先出現、又沒有「下稱」時，簡稱和全名可能換成不同的假名。
+- 人名和公司名稱用到相同的字時（陳佳穎、佳穎科技有限公司），公司的「下稱」別名可能換成人名的假名，跟公司的假名對不上。
 - 部分連鎖店、國營事業的當事人會被判成保留；日本公司（株式会社）、日本地址、和曆日期沒有處理。
 
 ## 運作方式
