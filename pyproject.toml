@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "taiwan-legal-deid"
+version = "0.1.0"
+description = "台灣法律文件去識別化：人名、個資、私人機構換成擬真假名，留對照表可還原（本機 CPU 執行）"
+readme = "README.md"
+license = "MIT AND Apache-2.0"
+license-files = ["LICENSE", "LICENSES/*", "NOTICE"]
+requires-python = ">=3.10"
+authors = [{ name = "LawChat", email = "opensource@lawchat.com.tw" }]
+keywords = ["de-identification", "pseudonymization", "PII", "Taiwan", "legal", "Traditional Chinese"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Natural Language :: Chinese (Traditional)",
+    "Topic :: Text Processing :: Linguistic",
+]
+dependencies = ["numpy", "onnxruntime>=1.16", "tokenizers>=0.19"]
+
+[project.optional-dependencies]
+train = ["mlx", "transformers", "safetensors"]       # 訓練（Apple Silicon）
+export = ["torch", "transformers", "safetensors", "onnx"]  # 轉成 ONNX
+
+[project.scripts]
+taiwan-legal-deid = "taiwan_legal_deid.cli:main"
+
+[project.urls]
+Repository = "https://github.com/lawchat-oss/taiwan-legal-deid"
+Issues = "https://github.com/lawchat-oss/taiwan-legal-deid/issues"
+
+[tool.setuptools]
+packages = ["taiwan_legal_deid"]
+
+[tool.setuptools.package-data]
+taiwan_legal_deid = ["data/*"]

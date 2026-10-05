@@ -1,0 +1,11 @@
+/data/
+/runs/
+/base/
+/release/
+.venv*/
+__pycache__/
+*.pyc
+build/
+dist/
+*.egg-info/
+.pytest_cache/

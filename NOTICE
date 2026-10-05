@@ -1,0 +1,29 @@
+taiwan-legal-deid
+Copyright (c) 2026 lawchat-oss
+
+程式碼以 MIT 授權（LICENSE）。
+模型權重（GitHub Release weights-v1 的 model-6l.onnx、model-3l.onnx）以 Apache License 2.0 授權（LICENSES/Apache-2.0.txt）。
+
+本專案包含或衍生自下列第三方作品與政府開放資料：
+
+1. bert-base-chinese（Google）
+   - taiwan_legal_deid/data/tokenizer.json 由 bert-base-chinese 的 vocab.txt 與分詞設定轉成（另開啟英文轉小寫）。
+   - 模型權重由 bert-base-chinese 微調、蒸餾而來。
+   - Copyright 2018 The Google AI Language Team Authors. Licensed under the Apache License, Version 2.0（LICENSES/Apache-2.0.txt）。
+
+2. jieba 詞典（dict.txt.big）
+   - taiwan_legal_deid/data/jieba_dict_big.txt，未經修改。
+   - Copyright (c) 2013 Sun Junyi. MIT License（LICENSES/MIT-jieba.txt）。
+
+3. 內政部「全國路名資料」（https://data.gov.tw/dataset/35321）
+   - taiwan_legal_deid/data/roads_a.csv：縣市、行政區、路名。
+
+4. 內政部戶政司「姓氏排名與人數按三階段年齡分」112 年（https://data.gov.tw/dataset/126774）
+   - taiwan_legal_deid/surnames.py 的姓氏表由此整理。
+
+5. 金融監督管理委員會證券期貨局「上市公司基本資料」「上櫃公司基本資料」
+   （https://data.gov.tw/dataset/18419、https://data.gov.tw/dataset/25036）
+   - taiwan_legal_deid/data/tw_listed_companies.csv：只取公司代號、名稱、簡稱。
+
+第 3～5 項依「政府資料開放授權條款－第 1 版」（https://data.gov.tw/license）提供：
+此開放資料依政府資料開放授權條款（Open Government Data License）進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。
