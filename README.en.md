@@ -57,6 +57,15 @@ fake, mapping = ob.anonymize(text)     # pseudonymized text and the mapping tabl
 original = restore(ai_reply, mapping)  # restore an AI reply
 ```
 
+For several documents in the same case, create a new `Obfuscator` for each document and pass in the mapping returned for the previous one (the same as `--map` on the command line). Don't reuse one `Obfuscator` across documents.
+
+```python
+det = Detector()
+mapping = None
+for text in texts:
+    fake, mapping = Obfuscator(det, mapping=mapping).anonymize(text)  # restore AI replies about this document with this mapping
+```
+
 Detection only: `Detector().detect(text)` returns the position, type and score of each value.
 
 ### Offline use
@@ -91,6 +100,7 @@ Measured with weights-v1 (package 0.1.0). Reproduce with `python eval/reproduce.
 - Very long URLs (over about 220 characters) are sometimes missed entirely.
 - With a shared case mapping (`--map`), if a fake name from an earlier document happens to be a real name in a later one, that person's fake name or form of address may be inconsistent in later documents; restore each document with its own mapping file.
 - When a listed company's short name appears before its full name and there is no "下稱" alias, the short name and the full name may get different fake names.
+- When a person's name and a company name share the same characters (陳佳穎 and 佳穎科技有限公司), the company's "下稱" alias may get the person's fake name and no longer match the company's fake name.
 - Some chain stores and state-owned companies are kept when they are parties. Japanese companies (株式会社), Japanese addresses and Japanese era dates are not handled.
 
 ## How it works
