@@ -2,14 +2,14 @@
 
 [中文](README.md)
 
-De-identification for Taiwanese legal documents. On your own computer, it replaces names, personal data and private companies with realistic fakes and keeps a mapping table, so an AI's answer can be turned back into the original names afterwards.
+De-identification for Taiwanese legal documents. On your own computer, it replaces names, personal data and private companies with realistic fakes and keeps a mapping table, so an AI's answer can be turned back into the original names afterwards. It is built for Taiwanese legal documents and also works on general text.
 
-- **Replaces only what should be replaced**: the program lists every possible name, personal-data value and organization; a model then decides for each one whether to *replace*, *keep*, or *ignore* it. Judges, prosecutors, lawyers and clerks acting in their official roles are kept; parties, witnesses and other private persons are replaced. Government agencies are kept; private companies are replaced.
-- **Realistic fakes, not ○○○**: the same person gets the same fake name across the whole document, with surname and given name mapped separately (陳小姐 → 詹小姐). Addresses become real road names in the same city, national IDs get a valid checksum, birthdays keep the year (so ages stay the same), and listed-company short names and "下稱" aliases follow the full name.
+- **Tells what to replace from what to keep**: the program lists every possible name, personal-data value and organization; a model then decides for each one whether to *replace*, *keep*, or *ignore* it. Judges, prosecutors, lawyers and clerks acting in their official roles are kept; parties, witnesses and other private persons are replaced. Government agencies are kept; private companies are replaced.
+- **Realistic fakes**: the same person gets the same fake name across the whole document, with surname and given name mapped separately (陳小姐 → 詹小姐). Addresses become real road names in the same city, national IDs get a valid checksum, birthdays keep the year (so ages stay the same), and listed-company short names and "下稱" aliases follow the full name.
 - **Legal mode (default)**: dates of personal events are left unchanged, so an AI can still reason about periods and deadlines. Land lot numbers keep the section name and are replaced consistently across the case.
 - **Runs locally on CPU**: no GPU needed, and no network access except for downloading the model the first time. The mapping table is a JSON file on your computer.
 
-> This is pseudonymization, not anonymization: anyone with the mapping table can restore the original text, so keep the table as carefully as the personal data itself. The tool will miss things; always check by hand before sharing.
+> This is pseudonymization (a de-identification technique defined in ISO/IEC 20889), not anonymization: anyone with the mapping table can restore the original text, so keep the table as carefully as the personal data itself, and store it separately from the pseudonymized text. The tool will miss things; always check by hand before sharing.
 
 ## Example
 
@@ -80,14 +80,14 @@ Measured with weights-v1 (package 0.1.0). Reproduce with `python eval/reproduce.
 |---|---|---|
 | Synthetic legal documents: names to replace, fully replaced | 93.3% | 91.1% |
 | Synthetic legal documents: names in official roles kept | 98.0% | 98.0% |
-| Synthetic legal documents: other personal data, fully replaced | 93.6% | 93.0% |
+| Synthetic legal documents: other personal data, fully replaced (general mode) | 93.6% | 93.0% |
 | tw-PII-bench test half: personal data other than names, fully replaced | 95.7% | 95.1% |
 | Speed: find and replace in one document of about 100,000 characters (Apple M5 Max CPU) | about 12 s | about 8 s |
 
 **All numbers on this page come from synthetic test sets. Synthetic data is usually simpler than real documents, so real-world results may be lower. Always check by hand before sharing.**
 
-- **Synthetic legal test set** (`eval/data/synthetic_legal_test.jsonl`): 75 fictional complaints, judgments, police records, certified letters, chat logs, emails and similar documents, 21,823 characters in total. The set was sealed before any evaluation, and its errors were never inspected during development. It marks 462 names to replace, 51 names in official roles, and 498 other personal-data values. Each document is tagged with its difficulty types: 1 rare surnames, indigenous and foreign names; 2 names that look like ordinary words; 3 OCR noise; 4 the same value written in several ways; 5 names to keep next to names to replace; 6 general documents.
-- **tw-PII-bench** ([lianghsun/tw-PII-bench](https://huggingface.co/datasets/lianghsun/tw-PII-bench), Liang Hsun Huang, Apache-2.0): the 453 items with `crc32(id) % 2 == 1`, scored in general mode. The person-name category is not reported because the whole benchmark was used during development before the split.
+- **Synthetic legal test set** (`eval/data/synthetic_legal_test.jsonl`): 75 fictional complaints, judgments, transcripts, certified letters, chat logs, emails and similar documents, 21,823 characters in total. The set was sealed before any evaluation, and its errors were never inspected during development. It marks 462 names to replace, 51 names in official roles, and 498 other personal-data values. Each document is tagged with its difficulty types: 1 rare surnames, indigenous and foreign names; 2 names that look like ordinary words; 3 OCR noise; 4 the same value written in several ways; 5 names to keep next to names to replace; 6 general documents.
+- **tw-PII-bench** ([lianghsun/tw-PII-bench](https://huggingface.co/datasets/lianghsun/tw-PII-bench), Liang Hsun Huang, Apache-2.0): the 453 items with `crc32(id) % 2 == 1`, scored in general mode. The person-name category is not reported because person names across the whole benchmark were inspected during development, before the split.
 - "Fully replaced" means every character of the annotated value was replaced; partial replacement counts as a miss.
 - In legal mode, birthdays are fully replaced 95.1% of the time and personal-event dates are kept 98.3% of the time (same for both models).
 
@@ -109,15 +109,15 @@ Measured with weights-v1 (package 0.1.0). Reproduce with `python eval/reproduce.
 2. **Decisions (model)**: each text window goes through the model once, which decides *replace / keep / ignore* for every candidate in it. The model is fine-tuned from bert-base-chinese and distilled from 12 layers into 6 and 3 layers, running on CPU through ONNX.
 3. **Replacement (program)**: realistic fakes by type, consistent across the document; other spellings of the same value elsewhere are replaced too.
 
-Training data: public court judgments (real names on the party lists are first replaced with fake names, so the model never sees them), synthetic legal documents, and programmatic augmentation. The training code is in `taiwan_legal_deid/train.py` (MLX, Apple Silicon) and must be run from the repository, since it reads and writes the repository's `data/` folder; the training data is not published.
+Training data: public court judgments (the names of parties, representatives, judges, clerks and others listed in each judgment are first replaced consistently with fake names), synthetic legal documents, and programmatic augmentation. The training code is in `taiwan_legal_deid/train.py` (MLX, Apple Silicon) and must be run from the repository, since it reads and writes the repository's `data/` folder; the training data is not published.
 
 ## About
 
 Maintained by [LawChat](https://lawchat.com.tw) — a Taiwan legal AI platform.
 
+- Issues and questions: [GitHub Issues](https://github.com/lawchat-oss/taiwan-legal-deid/issues)
 - Website: [lawchat.com.tw](https://lawchat.com.tw)
 - Contact: opensource@lawchat.com.tw
-- Issues: [GitHub Issues](https://github.com/lawchat-oss/taiwan-legal-deid/issues)
 
 Best-effort maintenance, no SLA on issues. Reports of missed or wrongly replaced values are welcome; replace any real personal data with made-up values before posting.
 

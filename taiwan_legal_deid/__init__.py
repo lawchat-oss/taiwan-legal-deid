@@ -5,7 +5,7 @@
     fake, mapping = ob.anonymize(text)   # 假名版文字、對照表（留在自己電腦）
     restore(ai_reply, mapping)           # AI 回覆換回原文
 """
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 
 def __getattr__(name):  # 用到才載入：訓練、匯出環境不必裝 onnxruntime，python -m taiwan_legal_deid.<模組> 也不會載入兩次

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "taiwan-legal-deid"
-version = "0.1.0"
+version = "0.1.1"
 description = "台灣法律文件去識別化：人名、個資、私人機構換成擬真假名，留對照表可還原（本機 CPU 執行）"
 readme = "README.md"
 license = "MIT AND Apache-2.0"
