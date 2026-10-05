@@ -3,7 +3,9 @@ message: "如果在研究或專案中使用了本工具，請引用："
 title: "taiwan-legal-deid：台灣法律文件去識別化"
 type: software
 authors:
-  - name: "lawchat-oss"
+  - name: "LawChat"
+    email: "opensource@lawchat.com.tw"
+    website: "https://lawchat.com.tw"
 version: "0.1.0"
 license:
   - MIT
