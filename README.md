@@ -111,6 +111,16 @@ for text in texts:
 
 訓練資料包括公開判決（名冊上的真名先換成假名，模型不看真名）、合成法律文件與程式擴增。訓練程式在 `taiwan_legal_deid/train.py`（MLX，Apple Silicon），要從 repo 執行（會讀寫 repo 裡的 `data/`）；訓練資料不公開。
 
+## 關於
+
+由 [LawChat](https://lawchat.com.tw) 維護 — 一個台灣法律 AI 平台。
+
+- 官網：[lawchat.com.tw](https://lawchat.com.tw)
+- 聯絡：opensource@lawchat.com.tw
+- 回報問題：[GitHub Issues](https://github.com/lawchat-oss/taiwan-legal-deid/issues)
+
+Best-effort 維護，不保證 issue 的回覆時效。歡迎回報漏換或換錯的例子；貼上來之前，請先把真實個資換成虛構的內容。
+
 ## 授權
 
 - 程式碼：MIT（`LICENSE`）。
@@ -127,7 +137,3 @@ for text in texts:
 ## 引用
 
 見 `CITATION.cff`。
-
----
-
-Maintained by [lawchat-oss](https://github.com/lawchat-oss). Contributions welcome.

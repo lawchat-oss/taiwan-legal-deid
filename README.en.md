@@ -111,6 +111,16 @@ Measured with weights-v1 (package 0.1.0). Reproduce with `python eval/reproduce.
 
 Training data: public court judgments (real names on the party lists are first replaced with fake names, so the model never sees them), synthetic legal documents, and programmatic augmentation. The training code is in `taiwan_legal_deid/train.py` (MLX, Apple Silicon) and must be run from the repository, since it reads and writes the repository's `data/` folder; the training data is not published.
 
+## About
+
+Maintained by [LawChat](https://lawchat.com.tw) — a Taiwan legal AI platform.
+
+- Website: [lawchat.com.tw](https://lawchat.com.tw)
+- Contact: opensource@lawchat.com.tw
+- Issues: [GitHub Issues](https://github.com/lawchat-oss/taiwan-legal-deid/issues)
+
+Best-effort maintenance, no SLA on issues. Reports of missed or wrongly replaced values are welcome; replace any real personal data with made-up values before posting.
+
 ## License
 
 - Code: MIT (`LICENSE`).
@@ -127,7 +137,3 @@ This tool helps reduce the risk of personal data leaking from documents. It does
 ## Citation
 
 See `CITATION.cff`.
-
----
-
-Maintained by [lawchat-oss](https://github.com/lawchat-oss). Contributions welcome.
