@@ -195,10 +195,10 @@ def main():
 
 
 if __name__ == "__main__":
-    t8, sp8 = parse("⟦ORG:岱昀公司⟧⟦P:王小明⟧到庭。")
+    t8, sp8 = parse("⟦ORG:澄嶼公司⟧⟦P:王小明⟧到庭。")
     for seed in range(30):  # 兩個值緊鄰：後一個的起點要算進前一個的結尾符號
         t9, sp9 = markdownify(t8, sp8, random.Random(seed))
-        assert [t9[s["start"]:s["end"]] for s in sp9] == ["岱昀公司", "王小明"], (t9, sp9)
+        assert [t9[s["start"]:s["end"]] for s in sp9] == ["澄嶼公司", "王小明"], (t9, sp9)
     t, sp = parse("請⟦P:王小明⟧先生與⟦P:王⟧太太、⟦K:賴清德⟧總統，王記牛肉麵。")
     assert t == "請王小明先生與王太太、賴清德總統，王記牛肉麵。" and [t[s["start"]:s["end"]] for s in sp] == ["王小明", "王", "賴清德"]
     t2, sp2 = resurrogate(t, [dict(s, text=t[s["start"]:s["end"]]) for s in sp], random.Random(0))
@@ -210,7 +210,7 @@ if __name__ == "__main__":
     got = [(t3[s["start"]:s["end"]], s["label"], s["group"]) for s in sp3]
     assert got[1][0].startswith("09") and len(got[1][0]) == 12 and got[1][0] != "0912-118-406", got
     assert got[2] == ("78年5月12日", "MASK", "pii") and got[3] == ("3/5", "KEEP", "pii") and "02-2345-6789" in t3, got
-    t4, sp4 = parse("甲方⟦ORG:岱昀顧問股份有限公司⟧（下稱⟦ORG:岱昀公司⟧）款項匯入⟦ORGK:玉山銀行⟧，⟦P:陳志明⟧簽收。")
+    t4, sp4 = parse("甲方⟦ORG:澄嶼顧問股份有限公司⟧（下稱⟦ORG:澄嶼公司⟧）款項匯入⟦ORGK:玉山銀行⟧，⟦P:陳志明⟧簽收。")
     for seed in range(6):  # 換到的那幾份：同品牌換成同一個假品牌、保留的機構與人名位置不受影響
         t5, sp5 = resurrogate_orgs(t4, [dict(s, text=t4[s["start"]:s["end"]]) for s in sp4], random.Random(seed))
         got = {s["tag"]: t5[s["start"]:s["end"]] for s in sp5 if s["tag"] != "ORG"}
