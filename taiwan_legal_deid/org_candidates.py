@@ -71,10 +71,11 @@ def _common(min_freq: int = 300) -> set[str]:
     p = os.path.join(os.path.dirname(__file__), "data", "jieba_dict_big.txt")
     out = set()
     if os.path.exists(p):
-        for line in open(p, encoding="utf-8"):
-            w, f = (line.split() + ["", ""])[:2]
-            if 2 <= len(w) <= 4 and int(f or 0) >= min_freq:
-                out.add(w)
+        with open(p, encoding="utf-8") as fh:
+            for line in fh:
+                w, f = (line.split() + ["", ""])[:2]
+                if 2 <= len(w) <= 4 and int(f or 0) >= min_freq:
+                    out.add(w)
     return out
 
 
@@ -166,7 +167,7 @@ def _raw(text: str) -> set[tuple[int, int, str]]:
                     and text.count(st) >= 2 and any(_after_boundary(text, m.start()) for m in re.finditer(re.escape(st), text)):
                 stems.add(st)  # 品牌會重複出現、而且至少一次出現在邊界後；名稱中間切出來的（盛顧、問服）不會
     n = 0
-    for st in sorted(stems, key=len, reverse=True):
+    for st in sorted(stems, key=lambda x: (-len(x), x)):  # 同長度再依字排：碰到上限時每次跑都處理同一批（集合順序會隨執行變）
         for m in re.finditer(re.escape(st), text):
             i = m.start()
             out.add((i, m.end(), "org_stem"))

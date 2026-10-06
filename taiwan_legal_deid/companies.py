@@ -13,7 +13,8 @@ _norm = lambda s: "".join(s.split()).replace("臺", "台")
 def _table():
     if not os.path.exists(PATH):
         return {}
-    return {_norm(r["name"]): r["short"] for r in csv.DictReader(open(PATH, encoding="utf-8")) if r["short"] and r["short"] != r["name"]}
+    with open(PATH, encoding="utf-8") as f:
+        return {_norm(r["name"]): r["short"] for r in csv.DictReader(f) if r["short"] and r["short"] != r["name"]}
 
 
 def all_short_names() -> set[str]:

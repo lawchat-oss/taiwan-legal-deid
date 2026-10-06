@@ -85,6 +85,12 @@ def _org_form(name, default="公司"):
     return default if suf is None else "公司" if suf in _COMPANY else suf
 
 
+def _tpl_kw(tpl, orig):
+    """對照表只存保留品牌位置的樣板（{c}顧問股份有限公司）：還原時拿來把「A科技」拆回品牌。退回的簡化樣板（A公司、Company A）不存，
+    沿用時從假值推回來（見 CodeObfuscator.__init__）。"""
+    return {} if tpl is None or tpl in ("Company {c}", "{c}" + (_org_form(orig) or "")) else {"tpl": tpl}
+
+
 def _brands(name):
     """名稱拿掉法律形式、產業詞、縣市後剩下的品牌（岱昀顧問股份有限公司 → 岱昀）：單獨出現（岱昀表示…）也換。"""
     core = re.sub(r"\s", "", name)
@@ -108,6 +114,10 @@ class CodeObfuscator:
         self.types = {e["key"]: e["type"] for e in live if not e.get("alias")}
         self.aliases = {e["key"]: e["c"] for e in live if e.get("alias")}  # 別名、品牌 → 機構的 key（跟著機構的字母走）
         self.alias_tpl = {e["key"]: e.get("tpl", "{c}") for e in live if e.get("alias")}  # 別名寫成的樣子：品牌字換成字母（麒碩科技 → {c}科技）
+        self.tpls = {e["key"]: e["tpl"] for e in live if e.get("tpl") and not e.get("alias")}  # 機構全名寫成的樣子（岱昀顧問股份有限公司 → {c}顧問股份有限公司）
+        for e in live:  # 0.2.0 的對照表沒有樣板：照當時的寫法（A公司、Company A）補上，同一案件前後才一致
+            if e.get("key", "")[:1] == "o" and e["key"] not in self.tpls and not e.get("alias") and e["fake"].startswith(("Company ", e["c"])):
+                self.tpls[e["key"]] = "Company {c}" if e["fake"].startswith("Company ") else "{c}" + e["fake"][len(e["c"]):]
         self.reserved = (set(), set(), set())
         self.events = set()  # 粗化過的個人行程日期（年月日）：同一天別處沒被抓到的寫法也粗化（只在記憶體，不進對照表）
         self.spans = []
@@ -151,8 +161,8 @@ class CodeObfuscator:
                         e["ambiguous"] = True
                 old = self.fakes.get(key)
                 if old is not None:  # 立刻登錄新寫法：模型這份漏抓同一個名字時，後面的同值補換照樣換成新代號
-                    fake = f"〔{new}〕" if key[0] == "t" else ("Company " + new if old.startswith("Company ") else new + old[len(c):]) if key[0] == "o" else new
-                    self._entry(key, fake, self.origs[key], self.types.get(key, "PERSON"))
+                    fake = f"〔{new}〕" if key[0] == "t" else self.tpls.get(key, "{c}").replace("{c}", new) if key[0] == "o" else new
+                    self._entry(key, fake, self.origs[key], self.types.get(key, "PERSON"), **_tpl_kw(self.tpls.get(key), self.origs[key]))
 
     def _alias_fake(self, akey, orig):
         """別名換成機構的字母：品牌字換掉、其餘照留（下稱麒碩科技 → A科技、岱昀公司 → A公司）；不是單獨字母、也不等於全名代號的寫法另記一筆，
@@ -187,7 +197,9 @@ class CodeObfuscator:
         masked = {_canon(text[s["start"]:s["end"]]) for s in spans if not kept(s)}
         keep = [(s["start"], s["end"]) for s in spans if kept(s) and _canon(text[s["start"]:s["end"]]) not in masked]
         is_full = lambda s: s["type"].startswith("PERSON") and (s.get("kind", "full") in _FULL or re.search(r"[A-Za-z·‧・．]", text[s["start"]:s["end"]]))
-        todo = sorted((s for s in spans if (s["start"], s["end"]) not in keep), key=lambda s: (not is_full(s), s["start"]))  # 全名先編，代號照出現順序
+        rank = lambda s: 0 if is_full(s) else 1 if s["type"].startswith("ORG") else 2
+        # 全名先編（代號照出現順序）；機構長的先排：簡稱（台積電）比全名先出現時，全名先建好別名，簡稱才跟著全名
+        todo = sorted((s for s in spans if (s["start"], s["end"]) not in keep), key=lambda s: (rank(s), -(s["end"] - s["start"]) if rank(s) == 1 else 0, s["start"]))
         fulls = {}  # 這份文件裡要換的全名（去空白）→ (姓, 名字)；外文名、找不到姓的不拿來對
         for s in todo:
             if is_full(s):
@@ -259,9 +271,19 @@ class CodeObfuscator:
             k = "o:" + _canon(orig)
             c = self._code(k, text, scan)
             form = _org_form(orig)
-            self._entry(k, f"Company {c}" if form is None else c + form, orig, "ORG")
-            # 明講的別名（下稱台積電）只擋很常用的詞（統一、中華）；沒明講、只是名稱裡的品牌，詞典裡的詞都不換（信義、玉山）
             brands = sorted(_brands(orig), key=len, reverse=True)
+            if k not in self.tpls:  # 全名：品牌換成字母、其餘照留（岱昀顧問股份有限公司 → A顧問股份有限公司），下稱的「A公司」才分得開、各自換得回來
+                tpl = re.sub(r"\s", "", orig)
+                for b in brands:
+                    tpl = tpl.replace(b, "{c}")
+                tpl = re.sub(r"(?:\{c\})+", "{c}", tpl)
+                rest = tpl.replace("{c}", " ")
+                for w in _ORG_TOKENS:
+                    rest = rest.replace(w, " ")
+                ok = tpl.count("{c}") == 1 and not re.search(r"[^\W_]", rest)  # 品牌以外只剩類型、產業、縣市這些詞（陳記麒碩商行的「陳」、全形的ＡＢＣ都不能留）
+                self.tpls[k] = "Company {c}" if form is None else tpl if ok else "{c}" + form  # 沒有品牌、品牌分好幾段、還有別的字：字母＋類型
+            self._entry(k, self.tpls[k].replace("{c}", c), orig, "ORG", **_tpl_kw(self.tpls[k], orig))
+            # 明講的別名（下稱台積電）只擋很常用的詞（統一、中華）；沒明講、只是名稱裡的品牌，詞典裡的詞都不換（信義、玉山）
             names = [(a, 300) for a in Obfuscator._alias_names(orig, text, s["end"])] + [(b, 1) for b in brands]
             for a, common in names:
                 ak = "a:" + _canon(a)
@@ -330,7 +352,7 @@ class CodeObfuscator:
             for m in rx.finditer(text):
                 if free(m.span()):
                     f = self._alias_fake(akey, m.group(0)) if akey else fake
-                    repl[m.span()] = (f, accept.get(f, set()))
+                    repl[m.span()] = (f, {_gnorm(self.origs[self.aliases[akey]])} if akey else accept.get(f, set()))  # 別名、品牌的位置還原成全名也算對
         for m in re.finditer(r"(?<![0-9])\d+(?:-\d+)?\s?[地建]號", text):  # 同一筆地號別處也換（短的「12地號」不夠五個字，上面的補換沒算到）
             k = f"t:{m.group(0)[-2:]}:{_canon(m.group(0))}"
             if k in self.fakes and free(m.span()):
@@ -409,11 +431,11 @@ def _demo():
     print(fake)
     for orig in ("陳美玲", "F223456781", "3月8日", "文心路", "0912-345-678", "岱昀", "林志強", "陳小姐", "美玲"):
         assert orig not in fake, orig
-    assert fake.startswith("原告甲（身分證〔身分證1〕，民國71年生，住臺中市〔地址1〕，手機〔電話1〕）與被告A公司（下稱A公司）"), fake
+    assert fake.startswith("原告甲（身分證〔身分證1〕，民國71年生，住臺中市〔地址1〕，手機〔電話1〕）與被告A顧問股份有限公司（下稱A公司）"), fake
     assert "甲小姐主張A違法" in fake and "甲並提出證人乙" in fake and "王大同律師" in fake and "法官宋芷蘅" in fake and "113年5月2日" in fake
     assert restore_exact(fake, ob.spans) == t and not any(e.get("ambiguous") for e in mp)
     ai = "甲小姐可主張A公司違法解僱；甲方與乙方之約定、甲說見解、指甲、甲級均不影響，乙之證詞亦有利於甲。請撥〔電話1〕或[電話1]。"
-    assert restore(ai, mp) == ("陳小姐可主張岱昀顧問股份有限公司違法解僱；甲方與乙方之約定、甲說見解、指甲、甲級均不影響，林志強之證詞亦有利於陳美玲。"
+    assert restore(ai, mp) == ("陳小姐可主張岱昀公司違法解僱；甲方與乙方之約定、甲說見解、指甲、甲級均不影響，林志強之證詞亦有利於陳美玲。"
                                "請撥0912-345-678或0912-345-678。"), restore(ai, mp)
     anon = Anonymizer().apply(t, sp)
     assert "113年5月起" in anon and "113年5月2日" not in anon and "民國71年生" in anon, anon
@@ -459,7 +481,7 @@ def _demo():
         warnings.simplefilter("always")
         f, m = eng.apply(e2, spans_of(e2, [("岱昀公司", "ORG_KEEP", None)]))
     assert "岱昀" not in f and "林志強" not in f and "甲方" in f, f
-    assert restore(f.replace("甲方", ""), m) == e2.replace("甲方", "").replace("岱昀公司", "岱昀顧問有限公司"), (f, restore(f, m))
+    assert restore(f.replace("甲方", ""), m) == e2.replace("甲方", ""), (f, restore(f, m))  # 別名原樣換回
     # 同一天的行程日期只抓到一處：別處也粗化；地號、建號：還原不掉字尾、不碰同數字的金額、地號建號分開
     e3 = "原告113年5月2日到職，113年5月2日當天簽約。西屯段12345地號、12345建號，價金12345元，同段12345地號另案。"
     a3 = Anonymizer().apply(e3, spans_of(e3, [("113年5月2日", "DATE_EVENT", None), ("西屯段12345地號", "ADDRESS", None), ("12345建號", "ADDRESS", None)]))
@@ -513,14 +535,76 @@ def _demo():
     # 別名的字尾跟全名不同（下稱麒碩科技）：寫成 A科技，而且換得回來；單獨的品牌寫成字母
     e11 = "被告麒碩科技股份有限公司（下稱麒碩科技）。麒碩科技應給付，麒碩表示異議。"
     f11, m11 = CodeObfuscator().apply(e11, spans_of(e11, [("麒碩科技股份有限公司", "ORG", None)]))
-    assert f11 == "被告A公司（下稱A科技）。A科技應給付，A表示異議。", f11
-    assert restore("A科技應給付，A公司不爭執。", m11) == "麒碩科技應給付，麒碩科技股份有限公司不爭執。"
+    assert f11 == "被告A科技股份有限公司（下稱A科技）。A科技應給付，A表示異議。", f11
+    assert restore("A科技應給付，A公司不爭執，A表示異議。A lawsuit was filed.", m11) == "麒碩科技應給付，麒碩公司不爭執，A表示異議。A lawsuit was filed."
+    # 上市櫃簡稱比全名先出現：跟著全名用同一個字母
+    tt = "台積電公告後，台灣積體電路製造股份有限公司即付款。"
+    ft, _ = CodeObfuscator().apply(tt, spans_of(tt, [("台積電", "ORG", None), ("台灣積體電路製造股份有限公司", "ORG", None)]))
+    assert ft == "A公告後，A股份有限公司即付款。", ft
+    # 人名和公司同字（陳佳穎、佳穎科技）：模型沒標的「佳穎」跟著下稱的公司；模型標成人名的照人名（不推翻模型的判斷）
+    tj = "原告陳佳穎與佳穎科技有限公司（下稱佳穎）間事件，佳穎應給付。朋友稱陳佳穎為佳穎。"
+    oj = CodeObfuscator()
+    ij = tj.rindex("佳穎")  # 最後一個「為佳穎」是人：模型標成名字
+    fj, _ = oj.apply(tj, spans_of(tj, [("陳佳穎", "PERSON", "full"), ("佳穎科技有限公司", "ORG", None), ("陳佳穎", "PERSON", "full")])
+                     + [{"start": ij, "end": ij + 2, "type": "PERSON", "kind": "given"}])
+    assert fj == "原告甲與A科技有限公司（下稱A）間事件，A應給付。朋友稱甲為甲。" and restore_exact(fj, oj.spans) == tj, fj
+    # 機構名稱裡有單字的品牌（陳記麒碩商行的「陳」）：整個寫成字母＋類型，不留真姓
+    tc = "被告陳記麒碩商行到庭。"
+    fc, _ = CodeObfuscator().apply(tc, spans_of(tc, [("陳記麒碩商行", "ORG", None)]))
+    assert fc == "被告A商行到庭。", fc
+    # 機構字母只在「被告A」「下稱A」這類稱呼後面換回；維生素A、A肝、A棟不換（前面是「被告」也一樣）；「A 公司」中間有空白也換
+    assert restore("被告A應給付，（下稱A）亦同；維生素A，A肝疫苗，A棟，被告A棟住戶。", m11) == "被告麒碩科技股份有限公司應給付，（下稱麒碩科技股份有限公司）亦同；維生素A，A肝疫苗，A棟，被告A棟住戶。"
+    assert restore("A 公司應付款，A有限公司亦同。", m11) == "麒碩 公司應付款，麒碩有限公司亦同。"  # 字母換回品牌，字尾照 AI 的寫法
+    # 沒有「下稱」：AI 自己簡寫的「A科技」只把字母換回品牌；A股是一般詞，不換
+    tk = "被告麒碩科技股份有限公司到庭。"
+    fk, mk = CodeObfuscator().apply(tk, spans_of(tk, [("麒碩科技股份有限公司", "ORG", None)]))
+    assert restore("被告A科技表示異議。原告A股交易紀錄。", mk) == "被告麒碩科技表示異議。原告A股交易紀錄。", (fk, restore("被告A科技表示異議。原告A股交易紀錄。", mk))
+    assert restore("被告A 棟住戶、被告A 型肝炎、被告A\n股。", mk) == "被告A 棟住戶、被告A 型肝炎、被告A\n股。"  # 中間夾空白、換行也一樣
+    assert restore("甲 方與甲\n板。", mp) == "甲 方與甲\n板。"
+    # 機構只標到品牌（被告麒碩公司的「麒碩」）：「A公司」只換回字母，公司兩字不會被吃掉，對照也不會被停用
+    tb = "被告麒碩公司到庭。"
+    fb, mb = CodeObfuscator().apply(tb, spans_of(tb, [("麒碩", "ORG", None)]))
+    assert fb == "被告A公司到庭。" and restore(fb, mb) == tb and restore("被告A應給付。", mb) == "被告麒碩應給付。", (fb, mb)
+    # 名稱裡全形英數的品牌（ＡＢＣ）也不能留
+    tw = "被告麒碩科技ＡＢＣ有限公司到庭。"
+    fw, _ = CodeObfuscator().apply(tw, spans_of(tw, [("麒碩科技ＡＢＣ有限公司", "ORG", None)]))
+    assert "ＡＢＣ" not in fw and "麒碩" not in fw, fw
+    # 模型只標到全名，後面較短的「麒碩有限公司」靠品牌補換（A有限公司）：機構對照不會被停用，還原成「麒碩有限公司」
+    ts = "被告麒碩科技有限公司（下稱麒碩）到庭。麒碩有限公司亦同。"
+    fs, ms = CodeObfuscator().apply(ts, spans_of(ts, [("麒碩科技有限公司", "ORG", None)]))
+    assert not any(e.get("ambiguous") for e in ms) and restore(fs, ms).endswith("麒碩有限公司亦同。") and restore("A科技有限公司", ms) == "麒碩科技有限公司", (fs, ms)
+    assert restore("隨機對照試驗（下稱A/B測試）、A+B方案、下稱A／B、下稱A / B。", ms) == "隨機對照試驗（下稱A/B測試）、A+B方案、下稱A／B、下稱A / B。"  # A/B測試不是代號
+    assert restore("維甲酸（下稱A酸）；（下稱「A」）", ms) == "維甲酸（下稱A酸）；（下稱「麒碩科技有限公司」）"  # 下稱A酸定義的是別的詞
+    # 退回的簡化樣板（陳記麒碩科技有限公司 → A公司）：AI 寫「A有限公司」時整段換回全名，不會拼出「…有限有限公司」
+    tf = "被告陳記麒碩科技有限公司到庭。"
+    ff, mf = CodeObfuscator().apply(tf, spans_of(tf, [("陳記麒碩科技有限公司", "ORG", None)]))
+    assert ff == "被告A公司到庭。" and restore("A有限公司", mf) == "陳記麒碩科技有限公司", (ff, restore("A有限公司", mf))
+    assert restore("被告A科技應給付。被告A應給付。", mf) == "被告A科技應給付。被告陳記麒碩科技有限公司應給付。"  # 拆不出品牌：接著名稱一段的不換
+    # 品牌是地名、常用詞（信義）也照樣拆回品牌；空白隔開的編號（A 1棟）不換
+    tx = "被告信義科技有限公司到庭。"
+    fx, mx = CodeObfuscator().apply(tx, spans_of(tx, [("信義科技有限公司", "ORG", None)]))
+    assert restore("被告A科技應給付，被告A 1棟住戶。", mx) == "被告信義科技應給付，被告A 1棟住戶。", restore("被告A科技應給付，被告A 1棟住戶。", mx)
+    # 機構代號撞號改名（原文有 A棟）：新代號照樣用原本的樣板，重新載入後模型漏抓也寫成「B顧問股份有限公司」
+    ea = CodeObfuscator()
+    e1 = "被告岱昀顧問股份有限公司到庭。"
+    _, ma = ea.apply(e1, spans_of(e1, [("岱昀顧問股份有限公司", "ORG", None)]))
+    with warnings.catch_warnings(record=True):
+        warnings.simplefilter("always")
+        _, ma = CodeObfuscator(mapping=ma).apply("A棟住戶指稱岱昀顧問股份有限公司未到。", [])
+        f3, m3 = CodeObfuscator(mapping=ma).apply("B棟住戶與岱昀顧問股份有限公司。", [])
+    assert "岱昀" not in f3 and "顧問股份有限公司" in f3 and restore("B棟", m3) == "B棟", f3
+    # 0.2.0 的對照表（機構寫成「A公司」、沒有樣板）：改號後照舊寫法換成「B公司」，還原得回來
+    old = [{"fake": "A公司", "original": "岱昀顧問股份有限公司", "type": "ORG", "code": True, "key": "o:岱昀顧問股份有限公司", "c": "A"}]
+    with warnings.catch_warnings(record=True):
+        warnings.simplefilter("always")
+        f4, m4 = CodeObfuscator(mapping=old).apply("A棟住戶指稱岱昀顧問股份有限公司未到。", [])
+    assert f4 == "A棟住戶指稱B公司未到。" and restore(f4, m4) == "A棟住戶指稱岱昀顧問股份有限公司未到。", f4
     # 同一個名字一處標成全名、一處標成名字：同一個代號
     e9 = "文昌到庭。文昌說明。"
     f9, _ = CodeObfuscator().apply(e9, [{"start": 0, "end": 2, "type": "PERSON", "kind": "full"}, {"start": 5, "end": 7, "type": "PERSON", "kind": "given"}])
     assert f9 == "甲到庭。甲說明。", f9
     # 機構代號還原：NBA公司 不是 A公司
-    assert restore("NBA公司與A公司均有責任。", mp) == "NBA公司與岱昀顧問股份有限公司均有責任。"
+    assert restore("NBA公司與A公司均有責任，A表示異議，見A棟。", mp) == "NBA公司與岱昀公司均有責任，A表示異議，見A棟。"
     # 同一個物件先處理過文件，再整批處理：舊代號撞到這批原文的，整批開始前就換掉
     pre = Anonymizer(FakeDet({"林志強到庭。": spans_of("林志強到庭。", [("林志強", "PERSON", "full")]),
                               "甲方委託林志強到庭。": spans_of("甲方委託林志強到庭。", [("林志強", "PERSON", "full")])}))

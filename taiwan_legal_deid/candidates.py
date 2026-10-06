@@ -96,7 +96,7 @@ def candidates(text: str) -> list[tuple[int, int, str]]:
 
 
 def given_candidates(text: str, full_names: set[str]) -> list[tuple[int, int, str]]:
-    """第二輪：文件裡已判定要遮的全名，把它的「名」也列為候選（林雅婷 → 雅婷姐）。"""
+    """第二輪：文件裡已判定要遮的全名，把它的「名」也列為候選（溫昀蓁 → 昀蓁姐）。"""
     out = set()
     for name in full_names:
         sl = surname_len(name)

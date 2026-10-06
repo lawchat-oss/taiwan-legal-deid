@@ -45,8 +45,9 @@ def _places():
     roads, dists, cities = set(), set(), set()
     p = os.path.join(os.path.dirname(__file__), "data", "roads_a.csv")
     if os.path.exists(p):
-        for row in csv.DictReader(open(p, encoding="utf-8-sig")):
-            cities.add(row["city"]); dists.add(row["site_id"][len(row["city"]):]); roads.add(row["road"])
+        with open(p, encoding="utf-8-sig") as f:
+            for row in csv.DictReader(f):
+                cities.add(row["city"]); dists.add(row["site_id"][len(row["city"]):]); roads.add(row["road"])
     alt = lambda s: s | {x.replace("臺", "台") for x in s} | {x.replace("台", "臺") for x in s}
     return alt(roads), alt(dists), alt(cities)
 

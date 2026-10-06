@@ -28,7 +28,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     try:
         _run(ap, a)
-    except FileNotFoundError as e:  # 檔案不在、離線模式沒有模型：一行訊息就好
+    except (FileNotFoundError, weights.DownloadError) as e:  # 檔案不在、離線模式沒有模型、模型下載失敗：一行訊息就好
         sys.exit(str(e))
 
 
