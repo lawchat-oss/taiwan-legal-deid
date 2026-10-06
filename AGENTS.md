@@ -11,7 +11,7 @@
    - `obfuscate.py`：擬真假名化（`Obfuscator`）、對照表與還原（`restore`）；
    - `codes.py`：代號版（`CodeObfuscator`，`Obfuscator(style="code")` 用它）與匿名化（`Anonymizer`，不留對照表）。
 
-其他：`weights.py` 第一次使用時下載 weights-v1 並驗 sha256；`cli.py` 是指令列；`labels.py` 是標籤和候選種類。
+其他：`weights.py` 第一次使用時下載權重（`weights.TAG`，目前 weights-v2）並驗 sha256；`cli.py` 是指令列；`labels.py` 是標籤和候選種類。
 
 ## 開發
 
@@ -54,7 +54,7 @@ python -m venv .venv-export && .venv-export/bin/pip install -e ".[export]"  # �
    - `python -m taiwan_legal_deid.data_synth` → 合成文件，以及它們的 OCR 版、Markdown 版副本（需要 `data/synth/raw_*.jsonl`；會覆寫既有檔案）
    - `python -m taiwan_legal_deid.data_augment` → `aug_docs.jsonl`（針對已知弱點的擴增）
    - 上市櫃公司簡稱表的更新：`python -m taiwan_legal_deid.companies`
-3. **訓練**：先訓 12 層老師，再蒸餾成 6 層、3 層。weights-v1 就是用這組參數訓的。
+3. **訓練**：先訓 12 層老師，再蒸餾成 6 層、3 層。weights-v1、weights-v2 都是用這組參數訓的。
    ```bash
    python -m taiwan_legal_deid.train --base base/bert-base-chinese --out runs/base --epochs 3
    python -m taiwan_legal_deid.train --base base/bert-base-chinese --out runs/g6 --teacher runs/base --layers 0,1,2,3,4,5 --lr-enc 1e-4 --epochs 4
@@ -71,5 +71,5 @@ python -m venv .venv-export && .venv-export/bin/pip install -e ".[export]"  # �
   3. 推 `v<版本>` tag。GitHub Actions（`release.yml`）會用 Trusted Publishing 發到 PyPI，並建 GitHub Release。
 - **權重**：每一版放在自己的 GitHub Release（例如 `weights-v1`）。換權重時：
   - 開一個新的 Release；
-  - 更新 `weights.py` 的 `RELEASE`、檔名與 sha256；
+  - 更新 `weights.py` 的 `TAG` 與 sha256；
   - 新權重認得更多候選種類的話，一併更新 `N_KINDS`。

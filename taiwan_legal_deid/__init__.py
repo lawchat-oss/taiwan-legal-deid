@@ -7,7 +7,7 @@
     fake, mapping = Obfuscator(det, style="code").pseudonymize(text)  # 假名化的代號版：甲、A公司、〔號碼1〕＋對照表
     anon = Anonymizer(det).anonymize(text)                 # 匿名化：代號、不留對照表，無法還原
 """
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 
 def __getattr__(name):  # 用到才載入：訓練、匯出環境不必裝 onnxruntime，python -m taiwan_legal_deid.<模組> 也不會載入兩次

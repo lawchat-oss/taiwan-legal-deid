@@ -7,6 +7,8 @@
    對照組：本件經法官某某審理、選任辯護人某某律師 → 保留。
 6. 法律文件的日期（事件日保留、出生日要遮）。7–10（v11）：上市櫃公司當事人／雇主 vs 順帶提到、英文暱稱、日本人名、私人 vs 機構電話。
    標註位置沒有一模一樣候選的文件整份丟掉（_uncovered；只有保留機構沒候選的話，拿掉那個標註就好）。
+13（v12）. 電話的版面：LINE 匯出（電話在行尾、下一行直接以時間開頭）、沒標欄名的 CSV／表格、OCR 把數字認成字母（0→O、1→l）。
+   私人電話要遮；客服、總機這類照舊不標（＝不是）。新的放在最後產生，前面 1–12 的文件逐字不變。
 用法：python -m taiwan_legal_deid.data_augment → data/train/aug_docs.jsonl
 """
 from __future__ import annotations
@@ -130,6 +132,17 @@ TEL_TPL = ("住家電話：{land}", "有事請打我家裡電話{land}，白天�
            "{p}的手機是{mobile}，住家電話{land}。", "公司總機{land_x}，請轉{p}分機。", "客服專線0800-{d3}-{d3b}，服務時間週一至週五。",
            "本院電話（0{a}）{d8}，承辦股別：{gu}股。", "{k}律師事務所電話{land_x}，傳真{land_x2}。", "如有疑問請洽{dept}，電話{land_x}。",
            "{p}留下的聯絡電話為{mobile}，另提供公司電話{land_x}。")
+# 13. 電話的版面
+CHAT_MSG = ("好 那我等你電話", "收到", "明天下午三點可以嗎", "我先把資料傳給你", "麻煩幫我確認一下", "了解，謝謝", "我晚點再跟你說", "那就這樣決定",
+            "我到了，在一樓等你", "這個月的費用{amt}元已經匯了", "會議改到{h}點", "還有{amt}沒繳喔", "OK", "好的 沒問題", "我今天{h}點以後才有空",
+            "收據我拍照給你", "你方便的時候回我一下", "週末要不要一起吃飯", "我再問問看", "{h}點{m}分到", "第{n}次了")
+CHAT_TEL = ("{p}的電話 {tel}", "他電話 {tel}", "我手機 {tel}", "有事打給我 {tel}", "這是我新的號碼 {tel}", "{tel}", "你直接打{tel}", "可以打{tel}找她",
+            "我家電話{tel}", "我先生的電話是{tel}", "聯絡人{p} {tel}", "麻煩回電 {tel}", "{tel} 這支", "我同學{p}說打{tel}就可以")
+CHAT_BIZ = ("客服電話 0800-{d3}-{d3b}", "公司總機{land}，請轉分機{n}", "掛號專線{land}")
+TABLE_TITLE = ("婚宴賓客名單", "家長通訊錄", "租客聯絡表", "活動報名表", "客戶聯絡清單", "社區住戶名冊", "")
+TABLE_REL = ("新娘大學同學", "新郎同事", "表姊", "鄰居", "學生家長", "租客", "客戶", "朋友", "國中同學", "社團學長")
+TABLE_NOTE = ("不需寄送", "素食", "已付訂金", "兩位大人一位小孩", "請寄電子檔", "", "晚到", "停車位一個")
+OCR_LOOK = {"0": "Oo", "1": "lI", "5": "S", "8": "B", "2": "Z", "6": "b"}
 DEPTS = ("臺北市政府勞動局", "消費者服務中心", "本公司人資部", "新北市政府法制局", "本會秘書處", "區公所社會課")
 
 
@@ -141,6 +154,52 @@ def _land(rng):
 
 def _mobile(rng):
     return rng.choice((f"09{rng.randint(10, 99)}-{rng.randint(100, 999)}-{rng.randint(100, 999)}", f"09{rng.randint(10000000, 99999999)}"))
+
+
+def _tel(rng):
+    """私人電話的各種寫法：手機（連字號、空白、連寫、+886）七成，市話三成。"""
+    m = f"09{rng.randint(10, 99)}{rng.randint(100000, 999999)}"
+    if rng.random() < 0.7:
+        return rng.choice((f"{m[:4]}-{m[4:7]}-{m[7:]}", m, f"{m[:4]} {m[4:7]} {m[7:]}", f"{m[:4]}-{m[4:]}", f"+886-{m[1:4]}-{m[4:7]}-{m[7:]}",
+                           f"+886 {m[1:4]} {m[4:7]} {m[7:]}", f"+886{m[1:]}"))
+    return _land(rng)
+
+
+def _ocr(rng, s):
+    """OCR 把數字認成長得像的字母（0→O、1→l…），偶爾多一個空白；至少換一個字。"""
+    idx = [i for i, c in enumerate(s) if c in OCR_LOOK]
+    pick = {i for i in idx if rng.random() < 0.35} or {rng.choice(idx)}
+    out = "".join(rng.choice(OCR_LOOK[c]) if i in pick else c for i, c in enumerate(s))
+    if rng.random() < 0.2:
+        j = rng.randint(1, len(out) - 1)
+        out = out[:j] + " " + out[j:]
+    return out
+
+
+def _build(parts):
+    """[(字串, 標註或 None)] → (文字, spans)；標註 "P"＝私人姓名、"TEL"＝私人電話。"""
+    text, spans = "", []
+    for v, lab in parts:
+        if lab == "P":
+            spans.append({"start": len(text), "end": len(text) + len(v), "label": "MASK"})
+        elif lab == "TEL":
+            spans.append({"start": len(text), "end": len(text) + len(v), "label": "MASK", "group": "pii", "tag": "TEL"})
+        text += v
+    return text, spans
+
+
+def _fmt(tpl, rng, tel=None, p=None):
+    """訊息模板 → parts（{tel}、{p} 標註，其他欄位填數字）。"""
+    fills = {"amt": f"{rng.randint(1, 60) * 1000:,}", "h": str(rng.randint(1, 12)), "m": f"{rng.randint(0, 59):02d}", "n": str(rng.randint(2, 9)),
+             "d3": str(rng.randint(100, 999)), "d3b": str(rng.randint(100, 999)), "land": _land(rng)}
+    parts, i = [], 0
+    while i < len(tpl):
+        j = tpl.find("{", i)
+        if j < 0:
+            parts.append((tpl[i:], None)); break
+        parts.append((tpl[i:j], None)); k = tpl.index("}", j); key = tpl[j + 1:k]
+        parts.append((tel, "TEL") if key == "tel" else (p, "P") if key == "p" else (fills[key], None)); i = k + 1
+    return parts
 
 
 def _uncovered(text, spans):
@@ -300,7 +359,62 @@ def main():
         tpl = rng.choice(BRAND_PARTY) if r < 0.5 else rng.choice(BRAND_INC) if r < 0.75 else rng.choice(BRAND_PARTY) + rng.choice(BRAND_INC)
         t, sp = render(tpl, fills, rng)
         put("brand", k, t, sp, ["person", "org"])
-    print("v11 擴增（留下／丟掉＝標註沒有候選）：", {k: f"{stats[k, True]}／{stats[k, False]}" for k in ("co", "nick", "jp", "tel", "pass", "brand")})
+    # 13. 電話的版面（v12；放在最後產生，前面的文件逐字不變）
+    def chat_line(spk, msg_parts, h, m):
+        r = rng.random()
+        if r < 0.45:
+            return [(f"{h:02d}:{m:02d} ", None), (spk, "P"), ("：", None)] + msg_parts
+        if r < 0.6:
+            return [(f"[{h:02d}:{m:02d}] ", None), (spk, "P"), ("：", None)] + msg_parts
+        if r < 0.75:
+            return [(f"{h:02d}:{m:02d}\t", None), (spk, "P"), ("\t", None)] + msg_parts
+        if r < 0.88:
+            return [(f"{'上午' if h < 12 else '下午'}{(h - 1) % 12 + 1}:{m:02d} ", None), (spk, "P"), (" ", None)] + msg_parts
+        return [(spk, "P"), (f" {h:02d}:{m:02d}\n", None)] + msg_parts
+
+    for k in range(3000):  # LINE 對話匯出：電話常在訊息最後面，下一行直接是下一則的時間
+        spk = [sample_name(rng) for _ in range(rng.choice((2, 2, 3)))]
+        ocr = rng.random() < 0.15
+        h, m, parts = rng.randint(7, 21), rng.randint(0, 50), []
+        for li in range(rng.randint(4, 9)):
+            r = rng.random()
+            tel = _tel(rng)
+            msg = (_fmt(rng.choice(CHAT_TEL), rng, _ocr(rng, tel) if ocr else tel, sample_name(rng)) if r < 0.35
+                   else _fmt(rng.choice(CHAT_BIZ), rng) if r < 0.43 else _fmt(rng.choice(CHAT_MSG), rng))
+            m += rng.randint(0, 6)
+            h, m = (h + m // 60) % 24, m % 60
+            parts += chat_line(rng.choice(spk), msg, h, m) + [(rng.choice(("\n", "\n", " \n")), None)]
+        t, sp = _build(parts[:-1])
+        put("chat", k, t, sp, ["person", "pii"])
+    for k in range(2000):  # CSV／表格：電話欄常常沒有欄名，同一列還有序號、人數、金額
+        sep = rng.choice((",", ",", "\t", "｜", " | "))
+        md = sep == " | "
+        head = rng.random() < 0.6
+        cols = ["序號", "姓名", rng.choice(("關係", "身分", "備考")), rng.choice(("人數", "數量", "金額")), rng.choice(("電話", "聯絡方式", "", "手機")), "備註"]
+        title = rng.choice(TABLE_TITLE)
+        parts = [(title + "\n", None)] if title else []
+        if head:
+            line = sep.join(cols)
+            parts += [(f"| {line} |\n" if md else line + "\n", None)]
+            if md:
+                parts += [("|" + "|".join(["---"] * len(cols)) + "|\n", None)]
+        ocr = rng.random() < 0.15
+        for i in range(rng.randint(3, 10)):
+            tel = _tel(rng)
+            num = str(rng.randint(1, 5)) if cols[3] != "金額" else f"{rng.randint(1, 30) * 500:,}"
+            row = [(f"{i + 1}{sep}", None), (sample_name(rng), "P"), (f"{sep}{rng.choice(TABLE_REL)}{sep}{num}{sep}", None),
+                   (_ocr(rng, tel) if ocr else tel, "TEL"), (f"{sep}{rng.choice(TABLE_NOTE)}", None)]
+            parts += ([("| ", None)] + row + [(" |\n", None)]) if md else row + [("\n", None)]
+        t, sp = _build(parts)
+        put("table", k, t.rstrip("\n"), sp, ["person", "pii"])
+    for k in range(1500):  # OCR：數字被認成字母的電話，放在一般句子、表單裡
+        tel = _ocr(rng, _tel(rng))
+        p = sample_name(rng)
+        tpl = rng.choice(("聯絡電話 {tel}", "電話：{tel}", "{p} {tel}", "{p}　電話 {tel}", "立書人 {p}（簽名）　電話 {tel}", "家長：{p}\n聯絡電話：{tel}",
+                          "有疑問請電 {tel} 找{p}", "{p}留下的電話為{tel}，另提供公司電話{land}。"))
+        t, sp = _build(_fmt(tpl, rng, tel, p))
+        put("ocrtel", k, t, sp, ["person", "pii"])
+    print("v11–v12 擴增（留下／丟掉＝標註沒有候選）：", {k: f"{stats[k, True]}／{stats[k, False]}" for k in ("co", "nick", "jp", "tel", "pass", "brand", "chat", "table", "ocrtel")})
     os.makedirs(f"{D}/train", exist_ok=True)
     with open(f"{D}/train/aug_docs.jsonl", "w") as f:
         for d in docs:

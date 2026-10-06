@@ -1,4 +1,4 @@
-"""模型權重：第一次用到時從 GitHub Release（weights-v1）下載，驗 sha256 後存在本機，之後不再連網。
+"""模型權重：第一次用到時從 GitHub Release（weights-v2）下載，驗 sha256 後存在本機，之後不再連網。
 - 存放位置：環境變數 TAIWAN_LEGAL_DEID_HOME；沒設就用 $XDG_CACHE_HOME/taiwan-legal-deid（預設 ~/.cache/taiwan-legal-deid）。
 - 離線：TAIWAN_LEGAL_DEID_OFFLINE=1 時一律不連網，檔案不在就報錯。
   先在有網路的機器執行 taiwan-legal-deid --download，再把整個資料夾複製到同一個位置（或用 TAIWAN_LEGAL_DEID_HOME 指過去）。
@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import hashlib, http.client, os, sys, tempfile, time, urllib.error, urllib.request
 
-RELEASE = "https://github.com/lawchat-oss/taiwan-legal-deid/releases/download/weights-v1"
+TAG = "weights-v2"  # 換權重時改這裡和下面的 sha256（本機資料夾、下載網址都跟著這個名字）
+RELEASE = f"https://github.com/lawchat-oss/taiwan-legal-deid/releases/download/{TAG}"
 MODELS = {  # 名稱 → (檔名, sha256)
-    "6l": ("model-6l.onnx", "13d03c7be03d85626b69a4bedd8834085298ca45fb428152aa2b7e13695fef83"),  # 6 層：預設，較準
-    "3l": ("model-3l.onnx", "7b6cdebd991389cad6e5ab4f9d8d000ce6cf47a75c573805cc0e0770875144aa"),  # 3 層：較快
+    "6l": ("model-6l.onnx", "092af630bbfdf9c6ff766a3b29bb6605037fcd6c3fefd568f885cdc75965bf65"),  # 6 層：預設，較準
+    "3l": ("model-3l.onnx", "3642e577512d8c8468d1088b4a6f8f24dc0c61315c0900509e6e79334b47587e"),  # 3 層：較快
 }
-N_KINDS = 19  # weights-v1 認得的候選來源類型數（labels.KINDS 前 19 種）
+N_KINDS = 19  # 這版權重認得的候選來源類型數（labels.KINDS 前 19 種）
 
 
 class DownloadError(RuntimeError):
@@ -28,7 +29,7 @@ def home() -> str:
 def path(name: str = "6l") -> str:
     """模型檔的本機路徑；還沒有就下載（離線模式除外）。"""
     fname, sha = MODELS[name]
-    p = os.path.join(home(), "weights-v1", fname)
+    p = os.path.join(home(), TAG, fname)
     if os.path.exists(p):
         return p
     if os.environ.get("TAIWAN_LEGAL_DEID_OFFLINE", "") not in ("", "0"):
