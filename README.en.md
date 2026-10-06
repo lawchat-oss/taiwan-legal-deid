@@ -103,36 +103,38 @@ Run `taiwan-legal-deid --download` (add `--model 3l` for the 3-layer model) on a
 
 ## Accuracy and speed
 
-Measured with weights-v1 (package 0.2.1). Reproduce with `python eval/reproduce.py` (also needs `pip install pyarrow`). All three outputs share one detection step, so a value the detector misses is missed by all three.
+Measured with weights-v2 (package 0.3.0). Reproduce with `python eval/reproduce.py` (also needs `pip install pyarrow`). All three outputs share one detection step, so a value the detector misses is missed by all three.
 
 | Pseudonymization | 6-layer (default) | 3-layer |
 |---|---|---|
-| Synthetic legal documents: names to replace, fully replaced | 93.3% | 91.1% |
+| Synthetic legal documents: names to replace, fully replaced | 92.6% | 91.6% |
 | Synthetic legal documents: names in official roles kept | 98.0% | 98.0% |
-| Synthetic legal documents: other personal data, fully replaced (general mode) | 93.6% | 93.0% |
-| tw-PII-bench test half: personal data other than names, fully replaced | 95.7% | 95.1% |
+| Synthetic legal documents: other personal data except phone numbers, fully replaced (general mode) | 93.2% | 94.1% |
+| tw-PII-bench test half: personal data other than names and phone numbers, fully replaced | 96.3% | 95.6% |
+| Synthetic legal documents: phone numbers, fully replaced (errors inspected during development; for reference only) | 95.9% | 95.9% |
+| tw-PII-bench test half: phone numbers, fully replaced (errors inspected during development; for reference only) | 96.1% | 94.6% |
 | Speed: find and replace in one document of about 100,000 characters (Apple M5 Max CPU) | about 12 s | about 8 s |
 
 | Anonymization (`Anonymizer` defaults) | 6-layer (default) | 3-layer |
 |---|---|---|
-| Synthetic legal documents: direct identifiers fully masked | 94.5% | 93.2% |
-| Synthetic legal documents: birthdays reduced to the year | 95.1% | 95.1% |
-| Synthetic legal documents: addresses reduced to the city or county | 83.3% | 80.0% |
-| Synthetic legal documents: personal-event dates reduced to year and month | 95.8% | 95.8% |
+| Synthetic legal documents: direct identifiers other than phone numbers, fully masked | 94.3% | 93.6% |
+| Synthetic legal documents: birthdays reduced to the year | 92.7% | 95.1% |
+| Synthetic legal documents: addresses reduced to the city or county | 86.7% | 85.6% |
+| Synthetic legal documents: personal-event dates reduced to year and month | 93.2% | 94.1% |
 | Synthetic legal documents: names in official roles kept | 96.1% | 96.1% |
-| tw-PII-bench test half: direct identifiers other than names, fully masked | 96.7% | 96.2% |
-| tw-PII-bench test half: addresses reduced to the city or county | 93.8% | 91.2% |
-| tw-PII-bench test half: dates generalized | 89.6% | 89.9% |
+| tw-PII-bench test half: direct identifiers other than names and phone numbers, fully masked | 97.4% | 97.0% |
+| tw-PII-bench test half: addresses reduced to the city or county | 94.7% | 89.8% |
+| tw-PII-bench test half: dates generalized | 90.3% | 91.6% |
 
 **All numbers on this page come from synthetic test sets. Synthetic data is usually simpler than real documents, so real-world results may be lower. Always check by hand before sharing.**
 
-- **Synthetic legal test set** (`eval/data/synthetic_legal_test.jsonl`): 75 fictional complaints, judgments, transcripts, certified letters, chat logs, emails and similar documents, 21,823 characters in total. The set was sealed before any evaluation, and its errors were never inspected during development. It marks 462 names to replace, 51 names in official roles, and 498 other personal-data values. Each document is tagged with its difficulty types: 1 rare surnames, indigenous and foreign names; 2 names that look like ordinary words; 3 OCR noise; 4 the same value written in several ways; 5 names to keep next to names to replace; 6 general documents.
+- **Synthetic legal test set** (`eval/data/synthetic_legal_test.jsonl`): 75 fictional complaints, judgments, transcripts, certified letters, chat logs, emails and similar documents, 21,823 characters in total. The set was sealed before any evaluation, and its errors were never inspected during development (exception: while developing 0.3.0, the phone-number errors in this set and in tw-PII-bench were inspected to find why phone numbers were missed, so the totals above leave phone numbers out and list them separately for reference only). It marks 462 names to replace, 51 names in official roles, and 498 other personal-data values. Each document is tagged with its difficulty types: 1 rare surnames, indigenous and foreign names; 2 names that look like ordinary words; 3 OCR noise; 4 the same value written in several ways; 5 names to keep next to names to replace; 6 general documents.
 - **tw-PII-bench** ([lianghsun/tw-PII-bench](https://huggingface.co/datasets/lianghsun/tw-PII-bench), Liang Hsun Huang, Apache-2.0): the 453 items with `crc32(id) % 2 == 1`, scored in general mode. The person-name category is not reported because person names across the whole benchmark were inspected during development, before the split.
 - "Fully replaced" and "fully masked" mean every character of the annotated value was replaced; partial replacement counts as a miss. Direct identifiers are names, national IDs, phone numbers, emails, URLs, account numbers, passwords, license plates, social-media handles and similar values; indirect identifiers (birthdays, addresses, dates) count as generalized when they were reduced, with the kept city or county excluded for addresses.
 - The pseudonymization table measures detection (model decisions); the anonymization table measures actual output (a name is also replaced where it must be replaced elsewhere in the document, so names in official roles are kept less often there).
 - Anonymization numbers are measured on the actual output: a direct identifier's output must not keep any of the original value (a password replaced as if it were a date, leaving 1986年, counts as a miss), a birthday may keep only the year, and a date may not keep the day.
-- Code pseudonymization uses the same replacement as anonymization: direct identifiers, birthdays, addresses and names in official roles score the same as in the table above; the difference is that personal-event dates are kept (98.3% on the synthetic legal documents, same for both models).
-- In legal mode, birthdays are fully replaced 95.1% of the time and personal-event dates are kept 98.3% of the time (same for both models).
+- Code pseudonymization uses the same replacement as anonymization: direct identifiers, birthdays, addresses and names in official roles score the same as in the table above; the difference is that personal-event dates are kept (96.6% for 6-layer and 97.5% for 3-layer on the synthetic legal documents).
+- In legal mode, birthdays are fully replaced 92.7% of the time with 6 layers and 95.1% with 3 layers; personal-event dates are kept 96.6% and 97.5% of the time.
 
 ## Scope and known limitations
 
@@ -141,7 +143,7 @@ Measured with weights-v1 (package 0.2.1). Reproduce with `python eval/reproduce.
 **Detection will miss things and make mistakes** (limits of the model, see the tables above); always check by hand before sharing:
 
 - People referred to only by given name or nickname in chats are often missed.
-- Address boundaries are hard to get exactly right (addresses fully replaced in the synthetic set: 88% for 6-layer, 84% for 3-layer).
+- Address boundaries are hard to get exactly right (addresses fully replaced in the synthetic set: 91% for 6-layer, 90% for 3-layer).
 - Names of lawyers or judges that appear on their own, without a title, in page headers or lists are sometimes treated as names to replace.
 - Very long URLs (over about 220 characters) are sometimes missed entirely.
 - Firms (law, accounting and land-administration offices), some chain stores and state-owned companies are often kept even when they are a party or a party's employer.

@@ -2,7 +2,7 @@
     pip install -e . pyarrow
     python eval/reproduce.py [--model 6l|3l]      （不給＝兩個都跑）
 1. tw-PII-bench（Liang Hsun Huang，Apache-2.0）測試半 453 份：固定版本、驗 sha256；切分 crc32(id) % 2 == 1。
-   README 只引用人名以外的類別：人名類別在切分之前整份看過，不算乾淨。
+   README 的總分不含人名、電話：人名類別在切分之前整份看過；電話在 0.3.0 開發時看過錯題（另列只供參考）。
 2. 合成法律文件測試集（eval/data/synthetic_legal_test.jsonl，75 份，虛構內容）。
 3. 匿名化（Anonymizer 預設）與代號假名化（style="code"）：直接識別資料有沒有整個換掉、間接識別資料（生日、地址、日期）有沒有粗化。偵測跟假名化同一份。
 """
@@ -20,6 +20,11 @@ BENCH = "https://huggingface.co/datasets/lianghsun/tw-PII-bench/resolve/62bdad50
 BENCH_SHA = {"short": "03e4850a0a97a2b5cb046c1dcd3996b42c5eea3766ae2618d4bbf64391e73693",
              "mid": "5d05e1c7fc6adaf7c66591de0d76e5ac5d175fb182f67a19da6d23896b3b02e0",
              "long": "b30ca2a1012254f164893d1aad491a778d2fe49cfef71239f8c934e0544883e2"}
+
+
+# 開發時看過錯題的類別，不算進總分（另列只供參考）：bench 的人名在切分之前整份看過；
+# 電話在 0.3.0 開發時為了找漏網原因，看過 bench 和合成法律文件的錯題（合成法律文件的直接識別資料也因此不含電話）
+SEEN_BENCH = {"private_person", "private_phone"}
 
 
 def load_bench():
@@ -89,20 +94,31 @@ def main():
         raw_bench, raw_synth = [det.detect(r["text"]) for r in bench], [det.detect(r["text"]) for r in synth_items]
         preds = [dict(p, spans=p["spans"] + p["pii"]) for p in predict(raw_bench, bench)]  # 一般模式：人名以外的個資全算要遮
         per, fp = bench_score(bench, preds)
-        report(f"{m}｜tw-PII-bench 測試半（人名類別不乾淨，只供參考）", per, fp)
-        n = sum(d["n"] for k, d in per.items() if k != "private_person")
-        c = sum(d["蓋滿"] for k, d in per.items() if k != "private_person")
-        print(f"→ {m}｜tw-PII-bench 測試半，人名以外的個資完整蓋住：{c / n:.1%}（{c}/{n}）")
-        marked_score(synth, predict(raw_synth, synth_items), f"{m}｜合成法律文件測試集")
+        report(f"{m}｜tw-PII-bench 測試半（人名、電話類別不乾淨，只供參考）", per, fp)
+        n = sum(d["n"] for k, d in per.items() if k not in SEEN_BENCH)
+        c = sum(d["蓋滿"] for k, d in per.items() if k not in SEEN_BENCH)
+        print(f"→ {m}｜tw-PII-bench 測試半，人名、電話以外的個資完整蓋住：{c / n:.1%}（{c}/{n}）")
+        d = per["private_phone"]
+        print(f"→ {m}｜tw-PII-bench 測試半，電話完整蓋住（開發時看過錯題，只供參考）：{d['蓋滿'] / d['n']:.1%}（{d['蓋滿']}/{d['n']}）")
+        ps = predict(raw_synth, synth_items)
+        marked_score(synth, ps, f"{m}｜合成法律文件測試集")
+        tot = {True: [0, 0], False: [0, 0]}  # 電話／電話以外的其他個資（一般模式：人名以外全算要遮）
+        for it, p in zip(synth, ps):
+            ms = [(x["start"], x["end"]) for x in p["spans"] + p["pii"]]
+            for s0, e0, tag in parse(it["text"])[1]:
+                if tag not in ("P", "K"):
+                    tot[tag == "TEL"][0] += all(any(a <= i < b for a, b in ms) for i in range(s0, e0)); tot[tag == "TEL"][1] += 1
+        print(f"→ {m}｜合成法律文件，電話以外的其他個資完整蓋住：{tot[False][0] / tot[False][1]:.1%}（{tot[False][0]}/{tot[False][1]}）")
+        print(f"→ {m}｜合成法律文件，電話完整蓋住（開發時看過錯題，只供參考）：{tot[True][0] / tot[True][1]:.1%}（{tot[True][0]}/{tot[True][1]}）")
         quasi = {"BIRTH": "生日", "ADDR": "地址", "DATE": "個人行程日期"}
         anon(f"{m}｜匿名化・合成法律文件", [r["text"] for r in synth_items], raw_synth, [parse(it["text"])[1] for it in synth],
-             {"P", "ID", "TEL", "MAIL", "URL", "ACCT", "SEC", "CAR", "HDL"}, quasi, keep={"K"})
+             {"P", "ID", "MAIL", "URL", "ACCT", "SEC", "CAR", "HDL"}, quasi, keep={"K"})
         anon(f"{m}｜匿名化・tw-PII-bench 測試半（人名以外）", [r["text"] for r in bench], raw_bench,
              [[(g["start"], g["end"], g["label"]) for g in r["spans"]] for r in bench],
-             {g["label"] for r in bench for g in r["spans"]} - {"private_person", "private_address", "private_date"},
+             {g["label"] for r in bench for g in r["spans"]} - SEEN_BENCH - {"private_address", "private_date"},
              {"private_address": "地址", "private_date": "日期"})
         anon(f"{m}｜代號假名化・合成法律文件", [r["text"] for r in synth_items], raw_synth, [parse(it["text"])[1] for it in synth],
-             {"P", "ID", "TEL", "MAIL", "URL", "ACCT", "SEC", "CAR", "HDL"}, dict(quasi, DATE="個人行程日期照留"), keep={"K"}, event_dates="keep")
+             {"P", "ID", "MAIL", "URL", "ACCT", "SEC", "CAR", "HDL"}, dict(quasi, DATE="個人行程日期照留"), keep={"K"}, event_dates="keep")
 
 
 if __name__ == "__main__":

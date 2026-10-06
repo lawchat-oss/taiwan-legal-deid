@@ -24,11 +24,11 @@ def test_download(tmp_path, monkeypatch):
     monkeypatch.delenv("TAIWAN_LEGAL_DEID_OFFLINE", raising=False)
     with pytest.raises(weights.DownloadError):  # sha256 不符：重試後報錯、不留檔
         weights.path("bad")
-    assert os.listdir(tmp_path / "home" / "weights-v1") == []
+    assert os.listdir(tmp_path / "home" / weights.TAG) == []
     monkeypatch.setattr(weights, "MODELS", dict(weights.MODELS, gone=("missing.onnx", "0" * 64)))
     with pytest.raises(weights.DownloadError, match="模型下載失敗"):  # 下載不到（網路斷、檔案不在）：一行訊息、不留半個檔案
         weights.path("gone")
-    assert os.listdir(tmp_path / "home" / "weights-v1") == []
+    assert os.listdir(tmp_path / "home" / weights.TAG) == []
     assert open(weights.path("ok"), "rb").read() == b"onnx"
     monkeypatch.setenv("TAIWAN_LEGAL_DEID_OFFLINE", "1")
     monkeypatch.setenv("TAIWAN_LEGAL_DEID_HOME", str(tmp_path / "empty"))
@@ -36,7 +36,7 @@ def test_download(tmp_path, monkeypatch):
         weights.path("ok")
 
 
-@pytest.mark.skipif(not os.path.exists(os.path.join(weights.home(), "weights-v1", "model-6l.onnx")), reason="還沒下載模型")
+@pytest.mark.skipif(not os.path.exists(os.path.join(weights.home(), weights.TAG, "model-6l.onnx")), reason="還沒下載模型")
 def test_detect():
     from taiwan_legal_deid import Anonymizer, Detector, Obfuscator, restore
     text = "原告林郁婷（手機 0912-345-678）與被告澄嶼顧問股份有限公司間給付工資事件，法官王大同。"
