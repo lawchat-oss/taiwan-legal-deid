@@ -28,9 +28,9 @@ for m in args or ["6l", "3l"]:
         det.detect(x)
     t1 = time.time()
     for x in texts:
-        Obfuscator(det).anonymize(x)
+        Obfuscator(det).pseudonymize(x)
     t2 = time.time()
-    Obfuscator(det).anonymize(big)
+    Obfuscator(det).pseudonymize(big)
     t3 = time.time()
     print(f"{m:10s} {len(texts)} 份 {chars} 字（執行緒 {TH or '預設'}）：偵測每千字 {(t1 - t) / chars * 1e6:6.1f} ms；"
           f"找出加替換共 {t2 - t1:.1f} 秒｜一份 {len(big)} 字的文件找出加替換 {t3 - t2:.1f} 秒")
