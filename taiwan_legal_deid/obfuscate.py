@@ -17,7 +17,7 @@
 """
 from __future__ import annotations
 
-import bisect, collections, copy, datetime as dt, functools, random, re
+import bisect, collections, copy, datetime as dt, functools, random, re, warnings
 
 from .candidates import SURNAME_AFTER, TITLES, surname_len
 from .companies import all_short_names, short_name
@@ -51,6 +51,12 @@ TRANSLIT_POOL = "瓦歷斯尤幹比令亞布伊婕拉達魯巴萬撒韵武荖約
 # 也不用（公開判決裡常組成一般詞）：紀（紀錄）杜（杜絕、杜拜）傅（師傅）梁（梁柱）沈（沈默）蕭（蕭條）卓（卓越）翁（翁婿）柯（古柯鹼）
 # 楊（楊梅區）吳（東吳）徐（徐州路）阮（台語「阮」）汪（汪汪）涂（涂抹）
 SAFE_SURNAMES = "劉蔡郭邱廖呂潘朱鍾彭詹趙盧魏鄧侯曹薛姚邵鄒龔鄔滕"
+# 代號版（codes.py）的人名代號：天干拿掉己（自己）、辛（辛苦）這種常組成一般詞的字，AI 回覆裡單獨出現時才換得回來
+PERSON_CODES = "甲乙丙丁戊庚壬癸"
+_BARE_CODE = re.compile(rf"[{PERSON_CODES}]\d*")
+# 代號後面接這些字是一般詞（甲方、甲說、甲級、甲狀腺、乙醇、甲子），前面是這些字也是（指甲、盔甲、園丁）：還原時不換
+_CODE_NEXT_BLOCK = set("方級種說案狀類型組區棟欄表式版稿目款項醇烯酮烷烴胺子丑寅卯辰巳午申酉戌亥")  # 「未」不擋：甲未到庭
+_CODE_PREV_BLOCK = set("指盔裝園壯補庖布")
 # 機構名稱：這些照留（法律形式、產業、類型看得出來），其餘的品牌字逐字換成品牌常用字
 ORG_PREFIX = re.compile(r"(?:醫療|學校|宗教)?(?:財團法人|社團法人)|私立|國立|公立|(?:" + "|".join(sorted(CITIES, key=len, reverse=True)) + r")(?:私立|立)?")
 ORG_KEEP_WORDS = sorted(set("""
@@ -262,11 +268,22 @@ def _rewrite_date_inner(s, fn):
 
 
 class Obfuscator:
-    """detector：有 detect(text) 的偵測器（taiwan_legal_deid.detect 或 taiwan_legal_deid.detect_onnx）。mode：general（個人行程日期位移）／legal（不動）。
-    mapping：沿用同一案件前面文件的對照表，讓同一個人在不同文件換成同一個假名。"""
+    """假名化（留對照表，可以把 AI 回覆換回原文）。detector：有 detect(text) 的偵測器（taiwan_legal_deid.detect 或 taiwan_legal_deid.detect_onnx）。
+    style：假名長什麼樣——realistic（預設，擬真假名：陳美玲 → 詹筱怡）／code（代號：甲、A 公司、〔號碼1〕，見 codes.py）。
+    mode：個人行程日期怎麼處理——legal（預設，照留）／general（擬真版整份位移、代號版只留年月）。
+    mapping：沿用同一案件前面文件的對照表，讓同一個人在不同文件換成同一個假名（同一案件不能混用兩種 style）。"""
 
-    def __init__(self, detector=None, mode="legal", seed=None, keep_city=True, mapping=None):
-        self.det, self.mode, self.keep_city = detector, mode, keep_city
+    def __init__(self, detector=None, mode="legal", seed=None, keep_city=True, mapping=None, style="realistic"):
+        if style not in ("realistic", "code"):
+            raise ValueError(f"style 只能是 realistic 或 code：{style!r}")
+        if mapping and any(e.get("code") for e in mapping) != (style == "code"):  # 代號的對照表配擬真假名（或反過來）會換錯
+            raise ValueError(f"對照表是{'代號版' if style == 'realistic' else '擬真版'}，跟 style={style!r} 不同：同一案件請用同一種")
+        self.det, self.mode, self.keep_city, self.style = detector, mode, keep_city, style
+        self._code = None
+        if style == "code":
+            from .codes import CodeObfuscator
+            self._code = CodeObfuscator(detector, mapping=mapping, event_dates="keep" if mode == "legal" else "month")
+            return
         self.rng = random.Random(seed)
         self.entries = [dict(e) for e in mapping or []]  # 每一項都複製：標 ambiguous、改類型都不會動到呼叫端手上的對照表
         live = [e for e in self.entries if not e.get("ambiguous")]  # 同一個原值有新舊兩筆時用最新的（撞名後另取的假名）；停用的不用
@@ -502,7 +519,8 @@ class Obfuscator:
             out.append(f); i = j
         return "".join(out)
 
-    def _alias_names(self, name, text, end):
+    @staticmethod
+    def _alias_names(name, text, end):
         """全名後面的別名（下稱台積電）＋上市櫃公司的簡稱。別名要含品牌字：本園、本院、被告公司、（全民健康保險的）健保這種通稱不算。"""
         brand = re.sub(r"\s", "", name)
         for w in _ORG_TOKENS:  # 拿掉法律形式、類型、產業詞、縣市（長的先拿），剩下的才是品牌字
@@ -642,10 +660,18 @@ class Obfuscator:
         return _shape(rng, s, keep=_keep_head(s) if typ == "NUMBER" else 0)
 
     # ── 主流程 ──────────────────────────────────────────────
-    def anonymize(self, text):
+    def pseudonymize(self, text):
+        """偵測並換掉：回傳 (假名版文字, 對照表)。對照表可以用 restore() 把 AI 回覆換回原文。"""
         return self.apply(text, self.det.detect(text))
 
-    def _reconcile(self, text, spans):
+    def anonymize(self, text):
+        """0.1.x 的舊名稱：跟 pseudonymize() 完全相同（仍回傳對照表、可以還原）。要不可還原的匿名化請用 Anonymizer。"""
+        warnings.warn("Obfuscator.anonymize() 做的是假名化（會回傳對照表），請改用 pseudonymize()；"
+                      "要不可還原的匿名化請用 Anonymizer。1.0 會移除這個名稱", FutureWarning, stacklevel=2)
+        return self.pseudonymize(text)
+
+    @staticmethod
+    def _reconcile(text, spans):
         """同一個人前後切法要一致：文件別處抓到「陳立基」，這裡卻只抓到「陳立」而原文其實接著「基」（陳立基於…）→ 補成「陳立基」。
         切法不一致會換成兩個假名，AI 就以為是兩個人。"""
         fulls = sorted({text[s["start"]:s["end"]] for s in spans if s["type"] == "PERSON" and s.get("kind") == "full"}, key=len, reverse=True)
@@ -663,6 +689,10 @@ class Obfuscator:
     def apply(self, text, spans):
         """spans：偵測結果（start、end、type、kind）。回傳 (假文字, 對照表)。
         法律模式（預設）：個人行程日期保留——實測把它們換掉會讓 AI 的時間推理出錯（見 README）。"""
+        if self._code:
+            fake, entries = self._code.apply(text, spans)
+            self.spans = self._code.spans
+            return fake, entries
         legal = self.mode == "legal"
         spans = self._reconcile(text, spans)
         # 原文裡的日期：假日期跟別人的真日期撞成同一天，AI 回覆還原時會連鎖換錯（甲的假生日＝乙的真生日）
@@ -797,31 +827,7 @@ class Obfuscator:
             out.append(fake); pos = b
         out.append(text[pos:])
         fake = "".join(out)
-        # 還原保護：這份假文字用對照表還原，必須逐字回到原文（斷行、空白不算）。某筆對照會換到這份文件裡的真實內容
-        # （前一份的假姓、假名字剛好是這份裡法官的姓名），就標成 ambiguous，還原時不用它
-        starts = [x["start"] for x in self.spans]
-
-        def to_orig(p, head):  # 假文字位置 → 原文位置；落在替換值中間時，替換值沒被還原到的那段要跟原值一樣（地號 410-1 的「-1」）才對得回去
-            i = bisect.bisect_right(starts, p) - 1
-            if i < 0:
-                return p
-            x = self.spans[i]
-            if p >= x["end"]:
-                return p - x["end"] + x["orig_end"]
-            if p == x["start"]:  # 剛好在下一個替換值的開頭（「蔡小姐」後面緊接著換掉的日期）
-                return x["orig_start"]
-            k = p - x["start"] if head else x["end"] - p
-            if head:
-                return x["orig_start"] + k if fake[x["start"]:p] == x["original"][:k] else None
-            return x["orig_end"] - k if fake[p:x["end"]] == x["original"][len(x["original"]) - k:] else None
-        for _ in range(20):
-            bad = [ent for s, e, new, ent in _select(_restore_hits(fake, self.entries))
-                   if (S := to_orig(s, True)) is None or (E := to_orig(e, False)) is None or _gnorm(text[S:E]) != _gnorm(new)]
-            if not bad:
-                break
-            for ent in bad:
-                ent.pop("bare", None)
-                ent["ambiguous"] = True
+        _guard(text, fake, self.spans, self.entries)
         return fake, [dict(e) for e in self.entries]  # 回傳獨立的一份：同一個 Obfuscator 處理下一份文件時，不會改到這份已交出去的對照表
 
     def _rename(self, s, kind="full"):
@@ -842,6 +848,41 @@ class Obfuscator:
             self.entries.append({"fake": fake, "original": orig, "type": typ})
         if typ not in _NOT_VALUE:
             self.cfwd[_canon(orig)], self.ctype[_canon(orig)] = fake, typ
+
+
+def _guard(text, fake, spans, entries):
+    """還原保護：這份假文字用對照表還原，必須逐字回到原文（斷行、空白不算）。某筆對照會換到這份文件裡的真實內容
+    （前一份的假姓、假名字剛好是這份裡法官的姓名），就標成 ambiguous，還原時不用它。
+    spans：假文字上的替換位置（start、end、original、orig_start、orig_end）；也可以帶 accept（還原成這些字串也算對，
+    代號版用：別名「台積電」的位置還原成公司全名、「陳小姐」的「陳」還原成全名，都是同一個對象）。"""
+    starts = [x["start"] for x in spans]
+
+    def to_orig(p, head):  # 假文字位置 → 原文位置；落在替換值中間時，替換值沒被還原到的那段要跟原值一樣（地號 410-1 的「-1」）才對得回去
+        i = bisect.bisect_right(starts, p) - 1
+        if i < 0:
+            return p
+        x = spans[i]
+        if p >= x["end"]:
+            return p - x["end"] + x["orig_end"]
+        if p == x["start"]:  # 剛好在下一個替換值的開頭（「蔡小姐」後面緊接著換掉的日期）
+            return x["orig_start"]
+        k = p - x["start"] if head else x["end"] - p
+        if head:
+            return x["orig_start"] + k if fake[x["start"]:p] == x["original"][:k] else None
+        return x["orig_end"] - k if fake[p:x["end"]] == x["original"][len(x["original"]) - k:] else None
+
+    def accepted(s, e, new):  # 剛好是一個替換值，而且還原成它允許的另一種寫法
+        i = bisect.bisect_right(starts, s) - 1
+        return i >= 0 and spans[i]["start"] == s and spans[i]["end"] == e and _gnorm(new) in spans[i].get("accept", ())
+    for _ in range(20):
+        bad = [ent for s, e, new, ent in _select(_restore_hits(fake, entries))
+               if ((S := to_orig(s, True)) is None or (E := to_orig(e, False)) is None or _gnorm(text[S:E]) != _gnorm(new))
+               and not accepted(s, e, new)]
+        if not bad:
+            break
+        for ent in bad:
+            ent.pop("bare", None)
+            ent["ambiguous"] = True
 
 
 def restore_exact(fake_text, spans):
@@ -874,14 +915,21 @@ def _select(hits):
 def _restore_hits(text, mapping):
     """要換回原值的位置：[(起, 訖, 換成, 對照項)]。所有替換都在原文上找位置、最後一次換完：
     換回來的原值不會再被當成別的假值換第二次（甲的假生日＝乙的真生日、前一份的假品牌＝這一份的真品牌）。"""
-    mapping = [e for e in mapping if not e.get("ambiguous")]
+    mapping = [e for e in mapping if not e.get("ambiguous") and not e.get("alias")]  # 代號版的別名、品牌（台積電 → A）只用來整案一致，還原用全名那一筆
     pairs = {}  # 寫法 → (原值, 對照項)；原值裡 OCR／PDF 的斷行不帶回 AI 回覆（文件本身用 restore_exact 逐字還原）
+    codes = {}  # 代號版的單獨人名代號（甲、丙2）：只在不像一般詞的位置換回，見最後
     for e in mapping:
+        if e.get("code") and _BARE_CODE.fullmatch(e["fake"]):
+            codes.setdefault(e["fake"], (e["original"], e))
+            continue
         if e["fake"] and e["type"] not in ("SURNAME", "LOT", "GIVEN_CHAR", "ORG_WORD", "ORG_CHAR") and not (e["type"] == "PERSON" and len(e["fake"]) == 1):
             pairs[e["fake"]] = (e["original"].replace("\r", "").replace("\n", ""), e)
     for e in mapping:
         if e["type"] != "SURNAME" and re.search(r"\s", e["fake"]) and len(e["fake"]) >= 4:  # AI 會把值中間的空白、斷行清掉再寫
             pairs.setdefault(re.sub(r"\s", "", e["fake"]), (e["original"], e))
+        if e.get("code") and e["fake"][:1] == "〔":  # 代號版的〔號碼1〕：AI 常把括號改成半形或【】
+            for a, b in ("[]", "［］", "【】"):
+                pairs.setdefault(a + e["fake"][1:-1] + b, (e["original"], e))
         if e["type"] == "SURNAME":  # 姓＋稱謂不蓋掉完整的值（假名「X君」的「君」也是稱謂：要還原成全名，不是「姓＋君」）
             for t in RESTORE_TITLES:
                 pairs.setdefault(e["fake"] + t, (e["original"] + t, e))
@@ -903,11 +951,13 @@ def _restore_hits(text, mapping):
     words = {e["fake"]: (e["original"], e) for e in mapping if e["type"] == "ORG_WORD" and len(e["fake"]) >= 3 and e["fake"] not in keyed}
     # 頭尾是數字或英文字母的值，前後不能接著同類的字：假日期 6/6 不換進 76/6/6、假電話不換進更長的帳號、假名 Sam 不換進 Sample
     word = lambda k: k.isascii() and k.isalpha()  # 整個是英文字母的值（假名、品牌字）才加英文邊界；OCR 日期 l5年… 這類混合的不加
-    def num(k, p, date):  # date：日期才另外擋「分隔號＋數字」（6/6 不換進 76/6/6）；號碼只擋前後接數字（0912345678/0987654321 兩支都換得回來）
-        pre = (r"(?<![0-9０-９])(?<![0-9０-９][/.\-])" if date else r"(?<![0-9０-９])") if k[0].isdigit() else r"(?<![A-Za-z])" if word(k) else ""
-        post = (r"(?![0-9０-９]|[/.\-][0-9０-９])" if date else r"(?![0-9０-９])") if k[-1].isdigit() else r"(?![A-Za-z])" if word(k) else ""
+    def num(k, p, date, code=False):  # date：日期才另外擋「分隔號＋數字」（6/6 不換進 76/6/6）；號碼只擋前後接數字（0912345678/0987654321 兩支都換得回來）
+        letter = word(k) or (code and k[0].isascii() and k[0].isalpha())  # 代號版的 A公司：前面不能接英文字母（NBA公司）
+        pre = (r"(?<![0-9０-９])(?<![0-9０-９][/.\-])" if date else r"(?<![0-9０-９])") if k[0].isdigit() else r"(?<![A-Za-z0-9])" if code and letter else r"(?<![A-Za-z])" if letter else ""
+        post = ((r"(?![0-9０-９]|[/.\-][0-9０-９])" if date else r"(?![0-9０-９])") if k[-1].isdigit()
+                else r"(?![A-Za-z0-9])" if code and k[-1].isascii() and k[-1].isalpha() else r"(?![A-Za-z])" if word(k) else "")  # Company A 不比對到 Company A2
         return pre + p + post
-    alts = ([(k, num(k, r"\s*".join(map(re.escape, k)), oe[1]["type"] in ("DATE", "DATE_EVENT"))) for k, oe in keyed.items()]
+    alts = ([(k, num(k, r"\s*".join(map(re.escape, k)), oe[1]["type"] in ("DATE", "DATE_EVENT"), bool(oe[1].get("code")))) for k, oe in keyed.items()]
             + [(k, rf"(?<![A-Za-z]){re.escape(k)}(?![A-Za-z])") for k in words])
     hits = []
     if alts:
@@ -915,6 +965,13 @@ def _restore_hits(text, mapping):
         for m in rx.finditer(text):
             k = re.sub(r"\s", "", m.group(0))
             hits.append((m.start(), m.end(), *(keyed[k] if k in keyed else words[k])))
+    words = _common(1) if codes else set()  # 詞典裡的詞（甲板、丁字、甲方）：代號跟後一個字組成一般詞就不換
+    for m in re.finditer("|".join(map(re.escape, sorted(codes, key=len, reverse=True))), text) if codes else ():
+        s, e = m.span()  # 單獨的代號：後面接數字（甲23）、接成一般詞（甲方、甲說、甲板）、前面接成一般詞（指甲、布丁）都不換；
+        nxt = text[e:e + 1]  # 後面接另一個代號（甲乙二人）或「未、等」（甲未到庭、甲等人；詞典裡另有乙未年、甲等）照換
+        word = len(m.group(0)) == 1 and m.group(0) + nxt in words and nxt not in codes and nxt not in "未等"
+        if not (nxt.isdigit() or nxt in _CODE_NEXT_BLOCK or text[s - 1:s] in _CODE_PREV_BLOCK or word):
+            hits.append((s, e, *codes[m.group(0)]))
     for e in mapping:  # 地號：AI 自己寫的「同段537-1地號」「537地號」，後面接著地號／建號才換（單獨的數字不動）
         if e["type"] == "LOT":
             hits += [(m.start(), m.end(), e["original"], e) for m in re.finditer(rf"(?<![0-9]){re.escape(e['fake'])}(?=(?:-\d+)?\s?[地建]號)", text)]

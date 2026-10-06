@@ -11,7 +11,7 @@ items, out = sys.argv[1:3]
 det = Detector(sys.argv[3] if len(sys.argv) > 3 else "6l")
 rows = [json.loads(l) for l in open(items, encoding="utf-8")]
 t = time.time()
-preds = predict(det, rows)
+preds = predict([det.detect(r["text"]) for r in rows], rows)
 with open(out, "w", encoding="utf-8") as f:
     for p in preds:
         f.write(json.dumps(p, ensure_ascii=False) + "\n")

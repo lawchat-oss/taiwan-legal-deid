@@ -6,7 +6,7 @@ authors:
   - name: "LawChat"
     email: "opensource@lawchat.com.tw"
     website: "https://lawchat.com.tw"
-version: "0.1.1"
+version: "0.2.0"
 license:
   - MIT
   - Apache-2.0
