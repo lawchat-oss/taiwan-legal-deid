@@ -4,40 +4,42 @@
 
 De-identification for Taiwanese legal documents. On your own computer, it finds names, personal data and private companies and replaces them with realistic fakes or codes; if you want to turn an AI's answer back into the original text, it keeps a mapping table. It is built for Taiwanese legal documents and also works on general text.
 
-Its design follows the de-identification technique classification of ISO/IEC 20889 and offers two modes: pseudonymization (reversible) and anonymization (irreversible). This is a design reference, not a certification or compliance assessment.
+It is designed with reference to the de-identification technique classification of ISO/IEC 20889 and offers two modes: pseudonymization (reversible) and anonymization (irreversible). This is a design reference, not a certification or compliance assessment.
 
 | Output | Looks like | Mapping table | Reversible | Use it when |
 |---|---|---|---|---|
-| Realistic pseudonymization (default) | 陳美玲 → 詹筱怡 | kept | yes | you send the text to an AI and turn the answer back into the original |
-| Code pseudonymization (`--codes`) | 陳美玲 → 甲, phone → 〔電話1〕 | kept | yes | readers should see at a glance what was replaced, and you still want to restore it |
-| Anonymization (`--anonymize`) | 陳美玲 → 甲, phone → 〔電話1〕 | none | no | you share with third parties or publish |
+| Realistic pseudonymization (default) | 陳美玲 → 郭淑瑩 | kept | yes | you send the text to an AI and turn the answer back into the original |
+| Code pseudonymization (`--codes`) | 陳美玲 → 甲, phone → 〔電話1〕 | kept | yes (birthdays reduced to the year stay that way) | readers should see at a glance what was replaced, and you still want to restore it |
+| Anonymization (`--anonymize`) | 陳美玲 → 甲, phone → 〔電話1〕, 113年5月2日 → 113年5月 | none | no | you share with third parties or publish, after checking by hand |
 
 - **Tells what to replace from what to keep**: the program lists every possible name, personal-data value and organization; a model then decides for each one whether to *replace*, *keep*, or *ignore* it. Judges, prosecutors, lawyers and clerks acting in their official roles are kept; parties, witnesses and other private persons are replaced. Government agencies are kept; private companies are replaced.
-- **Realistic fakes**: the same person gets the same fake name across the whole document, with surname and given name mapped separately (陳小姐 → 詹小姐). Addresses become real road names in the same city, national IDs get a valid checksum, birthdays keep the year (so ages stay the same), and listed-company short names and "下稱" aliases follow the full name.
+- **Realistic fakes**: the same person gets the same fake name across the whole document, with surname and given name mapped separately (陳小姐 → 郭小姐). Addresses become real road names in the same city, national IDs get a valid checksum, birthdays keep the year (so ages stay the same), and listed-company short names and "下稱" aliases follow the full name.
 - **Codes**: people become 甲, 乙 and so on (the same person gets the same code across the document; references by surname, given name or nickname get that code when they match exactly one full name, and become 〇 when several people share the surname, so no one is mixed up). Companies become A公司 and their "下稱" aliases follow. Numbers, emails and URLs become numbered tokens such as 〔電話1〕. Codes avoid characters the text already uses (if the text has 甲方, 甲 is not used as a code). Birthdays keep only the year and addresses only the city or county.
 - **Anonymization**: uses codes and keeps no mapping table; dates of personal events are also reduced to year and month (court and filing dates are kept; adjustable in Python).
 - **Legal mode (default)**: when pseudonymizing, dates of personal events are left unchanged, so an AI can still reason about periods and deadlines. Land lot numbers keep the section name and are replaced consistently across the case.
 - **Runs locally on CPU**: no GPU needed, and no network access except for downloading the model the first time. The mapping table is a JSON file on your computer.
 
-> Pseudonymization keeps a mapping table, and anyone with it can restore the original text: keep the table as carefully as the personal data itself, and store it separately from the pseudonymized text. Anonymization keeps no table and cannot be reversed, but the story told in the text can still reveal who someone is; whether the output is anonymous in the legal sense depends on the context and is for you to judge. The tool will miss things; always check by hand before sharing. Anonymized output consists of codes, so a missed real name stands out: check it all the more carefully before it leaves your hands.
+> Pseudonymization keeps a mapping table, and anyone with it can restore the original text: keep the table as carefully as the personal data itself, and store it separately from the pseudonymized text. Anonymization keeps no table and cannot be reversed, but it does not guarantee anonymity in the legal sense: the story told in the text can still reveal who someone is, and whether the output is anonymous in the legal sense depends on the context and is for you to judge. The tool will miss things; always check by hand before sharing. Anonymized output consists of codes, so a missed real name stands out: check it all the more carefully before it leaves your hands.
 
 ## Example
 
 Input (fictional):
 
-> 原告陳美玲（身分證 F223456781，民國71年3月8日生，住臺中市西屯區文心路三段100號7樓，手機 0912-345-678）與被告岱昀顧問股份有限公司（下稱岱昀公司）間確認僱傭關係存在事件。原告自113年5月2日起任職於岱昀公司，陳小姐主張岱昀公司違法解僱。被告訴訟代理人王大同律師。法官李佳穎。
+> 原告陳美玲（身分證 F223456781，民國71年3月8日生，住臺中市西屯區文心路三段1999號7樓，手機 0912-345-678）與被告岱昀顧問股份有限公司（下稱岱昀公司）間確認僱傭關係存在事件。原告自113年5月2日起任職於岱昀公司，陳小姐主張岱昀公司違法解僱。被告訴訟代理人王大同律師。法官宋芷蘅。
 
 Realistic pseudonymization (fake names differ on every run):
 
-> 原告詹筱怡（身分證 F202201647，民國71年11月1日生，住臺中市沙鹿區北勢二街二段566之6號7樓，手機 0964-883-566）與被告弘邦顧問股份有限公司（下稱弘邦公司）間確認僱傭關係存在事件。原告自113年5月2日起任職於弘邦公司，詹小姐主張弘邦公司違法解僱。被告訴訟代理人王大同律師。法官李佳穎。
+> 原告郭淑瑩（身分證 F200575662，民國71年9月6日生，住臺中市沙鹿區北勢七街二段242號7樓，手機 0925-228-858）與被告榮翔顧問股份有限公司（下稱榮翔公司）間確認僱傭關係存在事件。原告自113年5月2日起任職於榮翔公司，郭小姐主張榮翔公司違法解僱。被告訴訟代理人王大同律師。法官宋芷蘅。
 
 Code pseudonymization:
 
-> 原告甲（身分證 〔身分證1〕，民國71年生，住臺中市〔地址1〕，手機 〔電話1〕）與被告A公司（下稱A公司）間確認僱傭關係存在事件。原告自113年5月2日起任職於A公司，甲小姐主張A公司違法解僱。被告訴訟代理人王大同律師。法官李佳穎。
+> 原告甲（身分證 〔身分證1〕，民國71年生，住臺中市〔地址1〕，手機 〔電話1〕）與被告A公司（下稱A公司）間確認僱傭關係存在事件。原告自113年5月2日起任職於A公司，甲小姐主張A公司違法解僱。被告訴訟代理人王大同律師。法官宋芷蘅。
 
 Anonymization (the only differences from the code version: personal-event dates keep just year and month, and there is no mapping table):
 
-> 原告甲（身分證 〔身分證1〕，民國71年生，住臺中市〔地址1〕，手機 〔電話1〕）與被告A公司（下稱A公司）間確認僱傭關係存在事件。原告自113年5月起任職於A公司，甲小姐主張A公司違法解僱。被告訴訟代理人王大同律師。法官李佳穎。
+> 原告甲（身分證 〔身分證1〕，民國71年生，住臺中市〔地址1〕，手機 〔電話1〕）與被告A公司（下稱A公司）間確認僱傭關係存在事件。原告自113年5月起任職於A公司，甲小姐主張A公司違法解僱。被告訴訟代理人王大同律師。法官宋芷蘅。
+
+All examples are fictional. The IDs, phone numbers and addresses produced by the realistic version are random and may happen to match real ones.
 
 ## Install
 
@@ -91,7 +93,7 @@ for text in texts:
 
 To anonymize a batch: `Anonymizer(det).anonymize_many(texts)` (it scans all the texts first and avoids codes they already use; documents processed by the same `Anonymizer` share codes). `Anonymizer` options: `event_dates` (personal events: `month` by default, `year`, `keep`), `other_dates` (court and other dates: `keep` by default, `month`, `year`), `addr` (addresses: `city` by default, `district` keeps the district too).
 
-`Obfuscator.anonymize()` from 0.1.x still works and returns the same result as before (it pseudonymizes and returns a mapping table), with a warning to switch to `pseudonymize()`; it will be removed in 1.0. For irreversible anonymization use `Anonymizer`.
+`Obfuscator.anonymize()` from 0.1.x still works and returns the same result as before (it pseudonymizes and returns a mapping table), with a FutureWarning asking you to switch to `pseudonymize()`; it will be removed in 1.0. For irreversible anonymization use `Anonymizer`.
 
 Detection only: `Detector().detect(text)` returns the position, type and score of each value.
 
@@ -127,7 +129,7 @@ Measured with weights-v1 (package 0.2.0). Reproduce with `python eval/reproduce.
 - **Synthetic legal test set** (`eval/data/synthetic_legal_test.jsonl`): 75 fictional complaints, judgments, transcripts, certified letters, chat logs, emails and similar documents, 21,823 characters in total. The set was sealed before any evaluation, and its errors were never inspected during development. It marks 462 names to replace, 51 names in official roles, and 498 other personal-data values. Each document is tagged with its difficulty types: 1 rare surnames, indigenous and foreign names; 2 names that look like ordinary words; 3 OCR noise; 4 the same value written in several ways; 5 names to keep next to names to replace; 6 general documents.
 - **tw-PII-bench** ([lianghsun/tw-PII-bench](https://huggingface.co/datasets/lianghsun/tw-PII-bench), Liang Hsun Huang, Apache-2.0): the 453 items with `crc32(id) % 2 == 1`, scored in general mode. The person-name category is not reported because person names across the whole benchmark were inspected during development, before the split.
 - "Fully replaced" and "fully masked" mean every character of the annotated value was replaced; partial replacement counts as a miss. Direct identifiers are names, national IDs, phone numbers, emails, URLs, account numbers, passwords, license plates, social-media handles and similar values; indirect identifiers (birthdays, addresses, dates) count as generalized when they were reduced, with the kept city or county excluded for addresses.
-- "Names in official roles kept" for pseudonymization reflects the model's decisions; the anonymization row reflects the actual output (a name is also replaced where it must be replaced elsewhere in the document).
+- The pseudonymization table measures detection (model decisions); the anonymization table measures actual output (a name is also replaced where it must be replaced elsewhere in the document, so names in official roles are kept less often there).
 - Anonymization numbers are measured on the actual output: a direct identifier's output must not keep any of the original value (a password replaced as if it were a date, leaving 1986年, counts as a miss), a birthday may keep only the year, and a date may not keep the day.
 - Code pseudonymization uses the same replacement as anonymization: direct identifiers, birthdays, addresses and names in official roles score the same as in the table above; the difference is that personal-event dates are kept (98.3% on the synthetic legal documents, same for both models).
 - In legal mode, birthdays are fully replaced 95.1% of the time and personal-event dates are kept 98.3% of the time (same for both models).
@@ -146,6 +148,8 @@ Measured with weights-v1 (package 0.2.0). Reproduce with `python eval/reproduce.
 - Anonymization only handles the direct and indirect identifiers listed above; ages, occupations, schools, family relationships and details of events are not handled.
 - When restoring the code version, a lone code is not restored where it forms an ordinary word (甲方, 甲說, 甲級); values reduced to a year, a month or a city are not restored, and neither is a lone company letter (A), although A公司 is; a token such as 〔電話1〕 rewritten in some other form is not restored either.
 - When `Anonymizer.anonymize()` is called document by document and a later document already uses a code assigned earlier, that person gets a new code in that document and a warning is issued; process a batch with `anonymize_many()` or the command line instead.
+- Codes are consistent only within one `Anonymizer` or one command; across separate batches, 甲 in one batch is not the same person as 甲 in another.
+- When several people share a surname, a reference by surname alone (陳小姐) cannot be tied to one person and becomes 〇小姐.
 
 ## How it works
 

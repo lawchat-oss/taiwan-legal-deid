@@ -4,7 +4,7 @@
 1. tw-PII-bench（Liang Hsun Huang，Apache-2.0）測試半 453 份：固定版本、驗 sha256；切分 crc32(id) % 2 == 1。
    README 只引用人名以外的類別：人名類別在切分之前整份看過，不算乾淨。
 2. 合成法律文件測試集（eval/data/synthetic_legal_test.jsonl，75 份，虛構內容）。
-3. 匿名化（Anonymizer 預設）：直接識別資料有沒有整個換掉、間接識別資料（生日、地址、日期）有沒有粗化。偵測跟假名化同一份。
+3. 匿名化（Anonymizer 預設）與代號假名化（style="code"）：直接識別資料有沒有整個換掉、間接識別資料（生日、地址、日期）有沒有粗化。偵測跟假名化同一份。
 """
 import json, os, re, sys, zlib
 from collections import defaultdict
@@ -48,15 +48,15 @@ def _leak(orig, out):
     return orig in out or any(a[i:i + 4] in o for i in range(len(a) - 3))
 
 
-def anon(name, texts, raws, golds, direct, quasi, keep=()):
+def anon(name, texts, raws, golds, direct, quasi, keep=(), event_dates="month"):
     """匿名化（Anonymizer 預設：生日留年、地址留縣市、個人行程日期留年月）。golds：每份 [(起, 訖, 類別)]。看實際輸出：
     direct 的類別要整個換掉、輸出不留原值；quasi（類別 → 名稱）要粗化：生日只剩年（或整個遮掉）、日期不留日、地址扣掉照留的縣市後整個換掉；
-    keep 的類別不能被動到。"""
+    keep 的類別、以及名稱結尾是「照留」的 quasi（代號假名化的個人行程日期）不能被動到。event_dates＝keep 量代號假名化。"""
     from taiwan_legal_deid.codes import CodeObfuscator
     from taiwan_legal_deid.pii_candidates import CITIES
     tot = defaultdict(lambda: [0, 0])
     for t, raw, gold in zip(texts, raws, golds):
-        eng = CodeObfuscator(event_dates="month")
+        eng = CodeObfuscator(event_dates=event_dates)
         fake, _ = eng.apply(t, raw)
         reps = [(x["orig_start"], x["orig_end"], fake[x["start"]:x["end"]]) for x in eng.spans]
         for s, e, cat in gold:
@@ -68,7 +68,7 @@ def anon(name, texts, raws, golds, direct, quasi, keep=()):
             over = [r for r in reps if r[0] < e and r[1] > s]
             out = "".join(f for _, _, f in over)
             covered = all(any(a <= i < b for a, b, _ in over) for i in range(s, e))
-            ok = (not over if group == "保留" else covered and not _leak(t[s:e], out) if group == "直接識別資料"
+            ok = (not over if group == "保留" or group.endswith("照留") else covered and not _leak(t[s:e], out) if group == "直接識別資料"
                   else covered and (_parse_date(out) is None) if group == "生日"
                   else covered and not _has_day(out) if group in ("個人行程日期", "日期") else covered)
             tot[group][0] += ok
@@ -101,6 +101,8 @@ def main():
              [[(g["start"], g["end"], g["label"]) for g in r["spans"]] for r in bench],
              {g["label"] for r in bench for g in r["spans"]} - {"private_person", "private_address", "private_date"},
              {"private_address": "地址", "private_date": "日期"})
+        anon(f"{m}｜代號假名化・合成法律文件", [r["text"] for r in synth_items], raw_synth, [parse(it["text"])[1] for it in synth],
+             {"P", "ID", "TEL", "MAIL", "URL", "ACCT", "SEC", "CAR", "HDL"}, dict(quasi, DATE="個人行程日期照留"), keep={"K"}, event_dates="keep")
 
 
 if __name__ == "__main__":

@@ -400,17 +400,17 @@ def _demo():
             out.append({"start": i, "end": i + len(x), "type": typ, **({"kind": kind} if kind else {})})
         return out
     t = ("原告陳美玲（身分證F223456781，民國71年3月8日生，住臺中市西屯區文心路三段100號7樓，手機0912-345-678）與被告岱昀顧問股份有限公司（下稱岱昀公司）"
-         "間確認僱傭關係存在事件。原告自113年5月2日起任職於岱昀公司，陳小姐主張岱昀違法解僱，美玲並提出證人林志強之證詞。被告訴訟代理人王大同律師。法官李佳穎。")
+         "間確認僱傭關係存在事件。原告自113年5月2日起任職於岱昀公司，陳小姐主張岱昀違法解僱，美玲並提出證人林志強之證詞。被告訴訟代理人王大同律師。法官宋芷蘅。")
     sp = spans_of(t, [("陳美玲", "PERSON", "full"), ("F223456781", "CODE", None), ("民國71年3月8日", "DATE", None), ("臺中市西屯區文心路三段100號7樓", "ADDRESS", None),
                       ("0912-345-678", "NUMBER", None), ("岱昀顧問股份有限公司", "ORG", None), ("113年5月2日", "DATE_EVENT", None), ("陳", "PERSON", "partial"),
-                      ("美玲", "PERSON", "given"), ("林志強", "PERSON", "full"), ("王大同", "PERSON_KEEP", "full"), ("李佳穎", "PERSON_KEEP", "full")])
+                      ("美玲", "PERSON", "given"), ("林志強", "PERSON", "full"), ("王大同", "PERSON_KEEP", "full"), ("宋芷蘅", "PERSON_KEEP", "full")])
     ob = CodeObfuscator()
     fake, mp = ob.apply(t, sp)
     print(fake)
     for orig in ("陳美玲", "F223456781", "3月8日", "文心路", "0912-345-678", "岱昀", "林志強", "陳小姐", "美玲"):
         assert orig not in fake, orig
     assert fake.startswith("原告甲（身分證〔身分證1〕，民國71年生，住臺中市〔地址1〕，手機〔電話1〕）與被告A公司（下稱A公司）"), fake
-    assert "甲小姐主張A違法" in fake and "甲並提出證人乙" in fake and "王大同律師" in fake and "法官李佳穎" in fake and "113年5月2日" in fake
+    assert "甲小姐主張A違法" in fake and "甲並提出證人乙" in fake and "王大同律師" in fake and "法官宋芷蘅" in fake and "113年5月2日" in fake
     assert restore_exact(fake, ob.spans) == t and not any(e.get("ambiguous") for e in mp)
     ai = "甲小姐可主張A公司違法解僱；甲方與乙方之約定、甲說見解、指甲、甲級均不影響，乙之證詞亦有利於甲。請撥〔電話1〕或[電話1]。"
     assert restore(ai, mp) == ("陳小姐可主張岱昀顧問股份有限公司違法解僱；甲方與乙方之約定、甲說見解、指甲、甲級均不影響，林志強之證詞亦有利於陳美玲。"
