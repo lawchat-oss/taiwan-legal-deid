@@ -33,7 +33,7 @@ python -m venv .venv && .venv/bin/pip install -e . pytest
 - **測試集只用來量測**：`eval/data/synthetic_legal_test.jsonl` 是封存的考題，不要看錯題來調候選、資料或門檻。
 - 會影響準確度的改動，要用 `eval/reproduce.py` 重跑，並同步更新 `README.md` 和 `README.en.md`。
 - `labels.KINDS` 只能往後加新種類，不能改順序或插在中間：權重是靠位置認候選種類的。
-- 測試、範例、註解一律用虛構的值，不放真實個資。法官、律師、書記官的名字要先在司法院裁判書系統查過、查不到才用（範例曾經用到現任法官的名字）。
+- 測試、範例、註解一律用虛構的值，不放真實個資。法官、律師、書記官的名字要先在司法院裁判書系統查過、查不到才用（範例曾經用到現任法官的名字）。公司名要先查經濟部商工登記的現存公司（`https://data.gcis.nat.gov.tw/od/data/api/6BBA2268-1367-4B42-9CCA-BC17499EBE8C?$format=json&$filter=Company_Name like 品牌 and Company_Status eq 01&$skip=0&$top=10`），0 家才用（範例曾經用到真公司的品牌）。
 - 不 commit `data/`、`runs/`、`base/`、`release/` 和 `.onnx`（`.gitignore` 已排除）。權重另外放在 GitHub Release。
 - 註解用繁體中文。
 - 從 `main` 開分支、送 PR，squash merge。
