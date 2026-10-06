@@ -5,7 +5,7 @@
 - Email／網址／社群帳號：同格式換字元；公用信箱與大平台的網域留著。
 - 地址：預設保留縣市（管轄看得出來），其餘換成同縣市的真實路名。
 - 地號：段名留著，號碼整案一致地換（452→537、452-1→537-1：同一筆同一個假號，分割關係看得出來）。
-- 機構：只換品牌那段（逐字對應，整案一致：岱昀顧問／岱昀科技／岱昀公司 → 鼎昕顧問／鼎昕科技／鼎昕公司），
+- 機構：只換品牌那段（逐字對應，整案一致：澄嶼顧問／澄嶼科技／澄嶼公司 → 曦衍顧問／曦衍科技／曦衍公司），
   法律形式、產業詞、類型詞、分公司、縣市都留著；名稱裡的人名跟人名對照表走（陳記商行 → 劉記商行，陳先生 → 劉先生）。
   五個字以上的品牌（台灣積體電路製造）整段換成兩個字；別名（下稱台積電）和上市櫃公司的簡稱跟著全名換。
   保留的機構（政府機關、事務所、順帶提到的平台）不動。
@@ -21,7 +21,7 @@ import bisect, collections, copy, datetime as dt, functools, random, re, warning
 
 from .candidates import SURNAME_AFTER, TITLES, surname_len
 from .companies import all_short_names, short_name
-from .fakes import county_of, fake_address, fake_id
+from .fakes import county_of, fake_address, fake_id, luhn_ok, ubn_ok
 from .names import GIVEN_F, GIVEN_M, sample_surname
 from .org_candidates import BRANCH, SUFFIXES, _common
 from .pii_candidates import CITIES, DATES, _places
@@ -57,12 +57,16 @@ _BARE_CODE = re.compile(rf"[{PERSON_CODES}]\d*")
 # 代號後面接這些字是一般詞（甲方、甲說、甲級、甲狀腺、乙醇、甲子），前面是這些字也是（指甲、盔甲、園丁）：還原時不換
 _CODE_NEXT_BLOCK = set("方級種說案狀類型組區棟欄表式版稿目款項醇烯酮烷烴胺子丑寅卯辰巳午申酉戌亥")  # 「未」不擋：甲未到庭
 _CODE_PREV_BLOCK = set("指盔裝園壯補庖布")
+_LETTER_NEXT_BLOCK = set("棟級區型類版罩方案欄組款項式號樓座線點段肝片咖")  # A棟、A級、A肝：就算前面是「被告」也不是機構代號
+_TERM_END = set("）)」』”\"〕】，、。；：,.;:!?！？")
+_LETTER_ROLES = ("原告", "被告", "上訴人", "被上訴人", "聲請人", "相對人", "抗告人", "債權人", "債務人", "告訴人", "被害人", "申請人",
+                 "參加人", "異議人", "出租人", "承租人", "買受人", "出賣人", "雇主", "下稱", "簡稱")  # 單獨的機構字母只在這些稱呼後面換回（被告A、下稱A）
 # 機構名稱：這些照留（法律形式、產業、類型看得出來），其餘的品牌字逐字換成品牌常用字
 ORG_PREFIX = re.compile(r"(?:醫療|學校|宗教)?(?:財團法人|社團法人)|私立|國立|公立|(?:" + "|".join(sorted(CITIES, key=len, reverse=True)) + r")(?:私立|立)?")
 ORG_KEEP_WORDS = sorted(set("""
 建設 營造 顧問 管理顧問 科技 電子 資訊 國際 開發 實業 投資 貿易 保全 物業管理 物業 不動產 建築 室內裝修 裝修 設計 工程 機械 化工 食品 餐飲 生技 生物科技
 醫療 文教 教育 旅行 運輸 物流 汽車 精密 光電 能源 環保 紡織 印刷 廣告 行銷 傳播 娛樂 影視 數位 網路 軟體 通訊 電信 金融 證券 保險 人壽 產物 租賃
-美容 服飾 家具 五金 塑膠 鋼鐵 水泥 營建 地產 興業 企業 工業 商業 實業 農產 水產 畜產 製藥 藥品 醫藥 生醫 健康 照護 長照 托育 補習 文化 出版 音樂 藝術
+美容 服飾 家具 五金 塑膠 鋼鐵 水泥 營建 地產 興業 企業 工業 商業 實業 農產 水產 畜產 製藥 藥品 醫藥 生醫 健康 照護 長照 托育 補習 文化 出版 音樂 藝術 集團 控股
 運動 健身 休閒 觀光 開發建設 交通 客運 貨運 航運 海運 空運 通運 搬家 清潔 綠能 電機 電器 冷凍 空調 水電 機電 自動化 半導體 材料 包裝 物產 百貨
 傢俱 珠寶 銀樓 鐘錶 眼鏡 寵物 動物 婚紗 攝影 診所 牙醫 中醫 眼科 小兒科 婦產科 皮膚科 社區 大樓 管理 委員會 協會 學會 基金會 公益 慈善 宗親 同鄉
 記 家 氏 的 之 與 及
@@ -73,7 +77,7 @@ _ORG_STRUCT = sorted(set(SUFFIXES) | {"分公司", "分行", "分店", "營業�
 _ORG_TOKENS = sorted(set(_ORG_STRUCT) | set(ORG_KEEP_WORDS), key=len, reverse=True)
 _SHOP_AFTER_SURNAME = set("記家氏媽嬤姐哥師")  # 陳記、林家、王媽媽：開頭的姓跟人名對照表走
 _ORG_KEEP_1 = {w for w in ORG_KEEP_WORDS if len(w) == 1}  # 記、家、之、的：哪裡都照留；單字結尾詞（店、局、宮）只在最後才算
-ORG_CHARS = "鼎昕岳宏晟碩緯聯豐源泰勝達興隆嘉昌祥瑞益恆冠宇翔華群匯創璟騰禾鴻銓翊崴邦穎凱展昊頡晉澄奕霆煒璋峰岑灝暐睿駿麒燊鈺瀚昱勁曜崧樺楷捷嶸鎧鈞錡威德富榮茂豪弘承典誠智遠恩璞喬翰瑋薪"
+ORG_CHARS = "曦衍岳宏晟碩緯聯豐源泰勝達興隆嘉昌祥瑞益恆冠宇翔華群匯創璟騰禾鴻銓翊崴邦穎凱展昊頡晉澄奕霆煒璋峰岑灝暐睿駿麒燊鈺瀚昱勁曜崧樺楷捷嶸鎧鈞錡威德富榮茂豪弘承典誠智遠恩璞喬翰瑋薪"
 EN_KEEP_WORDS = set("""Consulting Consultants Technology Technologies Tech International Trading Development Construction Engineering Holdings Group
 Industrial Industries Enterprise Enterprises Bank Insurance Securities Logistics Foods Food Design Media Digital Software Systems Electronics
 Semiconductor Investment Investments Capital Management Services Service Realty Properties Property Global Asia Pacific Taiwan Co Co. Ltd Ltd.
@@ -90,7 +94,7 @@ _HW2FW_ALL = {c: c + 0xFEE0 for c in range(0x21, 0x7F)}
 _JUNK = r"[\s|｜_•¦¬~'·；;^]"  # 人名字間的空白、OCR 雜點（補換時容許、還原保護比對時不算）
 _gnorm = lambda x: re.sub(_JUNK, "", x).translate(str.maketrans("０１２３４５６７８９", "0123456789"))  # 還原保護的比對：雜點不算、全形數字當半形
 _NOT_VALUE = ("SURNAME", "GIVEN", "GIVEN_CHAR", "PERSON_PART", "LOT", "ORG_WORD", "ORG_CHAR")  # 組件、不是完整的值：不進「同值同假值」表（LOT＝地號號碼，單獨拿去比會誤換金額）
-# 機構全名後面的別名定義：（下稱台積電）、（以下簡稱「岱昀」）
+# 機構全名後面的別名定義：（下稱台積電）、（以下簡稱「澄嶼」）
 _ALIAS_RX = re.compile(r"\s*[（(]\s*(?:以下|下)?(?:簡稱|合稱|稱)\s*[：:]?\s*[「『“\"]?([^「」『』“”\"（）()，,、。；\s]{2,12}?)[」』”\"]?\s*[）)]")
 
 
@@ -254,15 +258,15 @@ def _rewrite_date_inner(s, fn):
         y, mo, d = fn(_cn_parse(m.group(1)), _cn_parse(m.group(2)), _cn_parse(m.group(3)) if m.group(3) else 1, True)
         ys = "".join(_CN_D[int(c)] for c in str(y))
         return s[:m.start()] + f"{ys}年{_cn_num(mo)}月" + (f"{_cn_num(d)}{m.group(4)}" if m.group(3) else "") + s[m.end():]
-    m = re.search(r"(?:(\d{1,2}) )?(" + "|".join(x[:3] for x in _MONTHS) + r")[a-z]*\.?(?: (\d{1,2})(?!\d))?(,? (\d{4}))?", s)
+    m = re.search(r"(?:(\d{1,2}) )?(" + "|".join(x[:3] for x in _MONTHS) + r")[a-z]*\.?(?: (\d{1,2})(st|nd|rd|th)?(?!\d))?(,? (\d{4}))?", s)
     if m:
         mo = [x[:3] for x in _MONTHS].index(m.group(2)) + 1
         d0 = int(m.group(1) or m.group(3) or 1)
-        y, mo2, d = fn(int(m.group(5)) if m.group(5) else None, mo, d0, False)
+        y, mo2, d = fn(int(m.group(6)) if m.group(6) else None, mo, d0, False)
         full = len(m.group(0).split()[0 if not m.group(1) else 1]) > 4
         mname = _MONTHS[mo2 - 1] if full else _MONTHS[mo2 - 1][:3]
-        dd = str(d)
-        body = (f"{dd} {mname}" if m.group(1) else (f"{mname} {dd}" if m.group(3) else mname)) + (f"{m.group(4)[:-4]}{y}" if m.group(5) else "")
+        dd = str(d) + ((("th" if 11 <= d % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(d % 10, "th"))) if m.group(4) else "")  # 31st → 4th
+        body = (f"{dd} {mname}" if m.group(1) else (f"{mname} {dd}" if m.group(3) else mname)) + (f"{m.group(5)[:-4]}{y}" if m.group(6) else "")
         return s[:m.start()] + body + s[m.end():]
     return None
 
@@ -286,22 +290,58 @@ class Obfuscator:
             return
         self.rng = random.Random(seed)
         self.entries = [dict(e) for e in mapping or []]  # 每一項都複製：標 ambiguous、改類型都不會動到呼叫端手上的對照表
+        days = self._load()
+        self.text_md, self.text_full = set(), set()  # 這份原文裡的日期（月日／年月日）：假日期不能跟它們撞，見 apply
+        self.shift = 7 * self.rng.choice([k for k in range(-26, 27) if abs(k) >= 4])
+        if days:  # 沿用案件對照表（一般模式）：照前面文件的位移挪，同一案件的日期間隔才對得上
+            self.shift = days.most_common(1)[0][0]
+        self._edays()
+        self._applied, self._lgchar = False, {}
+
+    def _edays(self):
+        """前面文件為了避撞多挪的天數：同一天別的寫法也照樣多挪（113年1月1日 → 2月6日，113/01/01 也要 → 113/02/06）。"""
+        self.eshift = {k: d - self.shift for k, d in self._edelta.items() if abs(d - self.shift) <= 3}
+
+    def _load(self):
+        """從對照表建出各張表。建構時建一次；同一個物件處理下一份文件前再建一次，前一份停用的對照、撞名改過的假名才會反映
+        （跟每份新建一個 Obfuscator 再傳入對照表完全一樣）。回傳個人行程日期位移的計數。"""
         live = [e for e in self.entries if not e.get("ambiguous")]  # 同一個原值有新舊兩筆時用最新的（撞名後另取的假名）；停用的不用
-        self.fwd = {e["original"]: e["fake"] for e in live}
+        last = {e["original"]: e for e in live}
+        self.fwd = {o: e["fake"] for o, e in last.items()}
+        self.comp = {o for o, e in last.items() if e["type"] in _NOT_VALUE}  # fwd 裡只是人名組件、品牌字的原值：不擋同字的完整值（名字璟嵐 vs 下稱璟嵐的公司）
         self.cfwd, self.ctype = {}, {}  # 正規化（去空白、全形轉半形）後的值 → 假值：同一個值寫法不同也換成同一個
         for e in live:
             if e["type"] not in _NOT_VALUE:
                 self.cfwd[_canon(e["original"])], self.ctype[_canon(e["original"])] = e["fake"], e["type"]
+        self.retired = {}  # 判定過要遮、假值卻停用了（撞到別份文件的真名）、也還沒有新假值的值：這份照樣要遮，另配假值（見 _revive）
+        for e in self.entries:
+            if e.get("ambiguous") and e["type"] not in _NOT_VALUE and _canon(e["original"]) not in self.cfwd:
+                self.retired[_canon(e["original"])] = e["type"]
+            if e.get("ambiguous") and e["type"] in ("ORG_BRAND", "ORG_ALIAS") and _canon(e["original"]) not in self.cfwd:  # 假品牌停用：用到它的機構全名也改配，
+                for c in [c for c, f in self.cfwd.items() if self.ctype[c] == "ORG" and _canon(e["original"]) in c and e["fake"] in f]:  # 跟新的關係企業同一個假品牌
+                    del self.cfwd[c], self.ctype[c]
+                    for o in [o for o in self.fwd if _canon(o) == c]:
+                        del self.fwd[o]
+                    self.retired[c] = "ORG"
+        self.dead = {e["fake"] for e in self.entries if e.get("ambiguous")} - set(self.fwd.values())  # 停用的假值：之後不再配給任何人
         self.sur, self.given, self.gchar = {}, {}, {}
         self.ochar, self.oword, self.lot = {}, {}, {}  # 機構品牌逐字對應、英文品牌字、地號號碼
-        for e in self.entries:
+        # 停用的（還原時會換錯別份文件真名的）姓、名字不再載入：不然下一份又用同樣的姓、名組回那個假名。例外：這個姓、名字沒有新的對照，
+        # 而且還有有效的全名用著它（只有單獨的「魏」撞到法官魏昀蓁，魏文翔這個全名照用）——照樣沿用，「王先生」才跟全名同一個姓
+        has = {(e["type"] == "SURNAME", e["original"]) for e in live if e["type"] in ("SURNAME", "GIVEN", "GIVEN_CHAR")}
+        fulls = [(e["original"], e["fake"]) for e in live if e["type"] == "PERSON"]
+        held = lambda e: e["type"] in ("SURNAME", "GIVEN", "GIVEN_CHAR") and (e["type"] == "SURNAME", e["original"]) not in has and any(
+            len(o) > len(e["original"]) and (o.startswith(e["original"]) and f.startswith(e["fake"]) or o[:1] in "老小" and (o[1:], f[1:]) == (e["original"], e["fake"])
+                                             if e["type"] == "SURNAME" else o.endswith(e["original"]) and f.endswith(e["fake"])) for o, f in fulls)
+        for e in [e for e in self.entries if not e.get("ambiguous") or held(e)]:
             if e["type"] == "SURNAME":
                 self.sur[e["original"]] = e["fake"]
             elif e["type"] in ("GIVEN", "GIVEN_CHAR"):
                 self.given[e["original"]] = e["fake"]
                 if len(e["original"]) == len(e["fake"]):  # 沿用案件對照表時，逐字對應也接著用（同一個字以先建立的為準，不被後面的蓋掉）
                     for a, b in zip(e["original"], e["fake"]):
-                        self.gchar.setdefault(a, b)
+                        if a != b:  # 同一個字不對到自己（舊版對照表可能有）
+                            self.gchar.setdefault(a, b)
             elif e["type"] in ("ORG_BRAND", "ORG_ALIAS", "ORG_CHAR") and len(e["original"]) == len(e["fake"]):  # ORG_ALIAS＝別名用到的品牌
                 self.ochar.update(zip(e["original"], e["fake"]))
             elif e["type"] == "ORG_WORD":
@@ -310,31 +350,46 @@ class Obfuscator:
                 self.gchar[e["original"]] = self.given[e["original"]] = e["fake"]
             elif e["type"] == "LOT":
                 self.lot[e["original"]] = e["fake"]
+        self.retired_sur = {e["original"] for e in self.entries if e.get("ambiguous") and e["type"] == "SURNAME"} - set(self.sur)  # 停用的姓：姓＋稱謂照樣要遮
         self.bday, self.eshift, self.bmon = {}, {}, {}  # 生日月日 → 假月日；個人行程日期 → 多挪的天數（同一天不同寫法換成同一個）；只寫到年月的生日 → 假月份
-        days = collections.Counter()
-        for e in self.entries:
+        days, self._edelta = collections.Counter(), {}  # _edelta：每個行程日期實際挪的天數（含避撞多挪的），位移定了之後換算成 eshift
+        for e in live:
             o, f = _parse_date(e["original"]), _parse_date(e["fake"])
             if not (o and f):
                 continue
             if e["type"] == "DATE":
                 self.bday.setdefault(o[1:], f[1:])
             elif e["type"] == "DATE_EVENT":
+                if isinstance(e.get("shift"), int):
+                    days[e["shift"]] += 1
+                    self._edelta[o] = e["shift"]
+                    continue
                 try:
-                    days[(_as_date(f) - _as_date(o)).days] += 1
+                    if o[0] is None or f[0] is None:  # 沒寫年份：原值當 2000 年，假值可能跨到前一年或下一年（12月20日 → 1月24日），取最近的那個
+                        delta = min(((dt.date(y, f[1], f[2]) - dt.date(2000, o[1], o[2])).days for y in (1999, 2000, 2001)
+                                     if not (f[1] == 2 and f[2] == 29 and y != 2000)), key=abs)
+                    else:
+                        delta = (_as_date(f) - _as_date(o)).days
                 except ValueError:
-                    pass
-        self.text_md, self.text_full = set(), set()  # 這份原文裡的日期（月日／年月日）：假日期不能跟它們撞，見 apply
-        self.shift = 7 * self.rng.choice([k for k in range(-26, 27) if abs(k) >= 4])
-        if days:  # 沿用案件對照表（一般模式）：照前面文件的位移挪，同一案件的日期間隔才對得上
-            self.shift = days.most_common(1)[0][0]
+                    continue
+                days[delta] += 1
+                self._edelta[o] = delta
+        return days
 
     # ── 對照表 ──────────────────────────────────────────────
     def _add(self, orig, fake, typ):
-        if orig not in self.fwd:
+        if typ in _NOT_VALUE:  # 人名組件、品牌字、地號：每種各自登錄（陳科技有限公司的品牌字「陳」、陳小明的姓「陳」；品牌冠宇、名字冠宇），還原才找得到
+            if not any(e["original"] == orig and e["type"] == typ and not e.get("ambiguous") for e in self.entries):
+                self.entries.append({"fake": fake, "original": orig, "type": typ})
+            if orig not in self.fwd:
+                self.fwd[orig] = fake
+                self.comp.add(orig)
+            return fake
+        if orig not in self.fwd or orig in self.comp:  # 名字「璟嵐」只是人名組件：「下稱璟嵐」的機構照樣登錄
             self.fwd[orig] = fake
             self.entries.append({"fake": fake, "original": orig, "type": typ})
-            if typ not in _NOT_VALUE:
-                self.cfwd.setdefault(_canon(orig), fake); self.ctype.setdefault(_canon(orig), typ)
+            self.comp.discard(orig)
+            self.cfwd.setdefault(_canon(orig), fake); self.ctype.setdefault(_canon(orig), typ)
         return self.fwd[orig]
 
     def _fresh(self, make, text):
@@ -349,7 +404,7 @@ class Obfuscator:
     # ── 人名 ──────────────────────────────────────────────
     def _fake_surname(self, sur, text, avoid):
         if sur not in self.sur:
-            used = set(self.sur.values())
+            used = set(self.sur.values()) | {e["fake"] for e in self.entries if e["type"] == "SURNAME"}  # 停用過的假姓也不再分給別的姓
             ok = lambda v: v != sur and v not in used and v not in avoid and not any(v + t in text for t in RESTORE_TITLES)
             jp = [s for s in JP_SURNAMES if len(s) == len(sur) and s != sur] if sur in JP_SURNAMES else None  # 日本姓換成同字數的日本姓
             v = None
@@ -383,14 +438,14 @@ class Obfuscator:
             for _ in range(30):
                 new, used = {}, taken  # 案件裡人名假值用過的字都不再分給別的字（單字暱稱才不會撞成同一個）
                 for c in given:
-                    if c in self.gchar or c in new:
+                    if c in self._lgchar or c in self.gchar or c in new:
                         continue
                     pool = GIVEN_F if (c in GIVEN_F and c not in GIVEN_M) else GIVEN_M if (c in GIVEN_M and c not in GIVEN_F) else name_pool
                     ok = lambda x: x not in used and x not in new.values() and x not in given  # 不對到原名裡的字（明→明，「阿明」就原樣留著）
                     choices = ([x for x in pool if ok(x)] or [x for x in _extra_given() if ok(x)]  # 名字常用字用完（人多的案件）：改用更大的字池，不同的字不撞
                                or [x for x in pool if x not in given] or list(pool))
                     new[c] = self.rng.choice(choices)
-                v = "".join(self.gchar.get(c) or new[c] for c in given)
+                v = "".join(self._lgchar.get(c) or self.gchar.get(c) or new[c] for c in given)
                 if not new or (v not in text and v not in self.given.values()):
                     break
             self.gchar.update(new)
@@ -504,15 +559,16 @@ class Obfuscator:
                 f = self.fwd.get(run) or self._fresh(lambda: next(v for v in iter(lambda: "".join(self.rng.sample(ORG_CHARS, 2)), None) if v not in real), text)
             else:
                 before = set(self.ochar)
+                taken = {e["fake"] for e in self.entries if e["original"] != run or e.get("ambiguous")}  # 停用過的假品牌也不再用
                 f = "".join(map(self._ochar, run))
                 for _ in range(20):  # 撞到真公司：只重抽這次新配的字（之前配好的字別處已經用了，不能動）
                     new = [c for c in dict.fromkeys(run) if c not in before]
-                    if (f not in real and f not in text) or not new:  # 假品牌也不能剛好是這份原文裡的另一家（麒碩科技）
+                    if (f not in real and f not in text and f not in taken) or not new:  # 假品牌也不能剛好是這份原文裡的另一家（汐嵐科技）、已經給別家用的假品牌
                         break
                     for c in new:
                         del self.ochar[c]
                     f = "".join(map(self._ochar, run))
-            if len(run) >= 2:  # 品牌（連續兩字以上）另記：AI 回覆只寫品牌（鼎昕表示…）也換得回來
+            if len(run) >= 2:  # 品牌（連續兩字以上）另記：AI 回覆只寫品牌（曦衍表示…）也換得回來
                 self._add(run, f, "ORG_BRAND")
             elif not any(e["type"] == "ORG_CHAR" and e["original"] == run for e in self.entries):
                 self.entries.append({"fake": f, "original": run, "type": "ORG_CHAR"})  # 單字品牌（德記）也記下，下一份文件沿用；不參與全文替換與還原
@@ -529,13 +585,13 @@ class Obfuscator:
         return [a for a in (m.group(1) if m else None, short_name(name)) if a and set(a) & (set(brand) - {" "})]
 
     def _org_aliases(self, name, text, end):
-        """別名跟著全名換（全名換掉、簡稱留著＝沒換）。長品牌整段縮成兩個字的（台灣積體電路製造 → 麒碩），簡稱（台積電）也用同一個假品牌。"""
+        """別名跟著全名換（全名換掉、簡稱留著＝沒換）。長品牌整段縮成兩個字的（台灣積體電路製造 → 汐嵐），簡稱（台積電）也用同一個假品牌。"""
         core = re.sub(r"\s", "", name)
         longs = [r for r in self.fwd if len(r) > 4 and r in core and self.ctype.get(_canon(r)) in ("ORG_BRAND", "ORG_ALIAS")]
         for a in self._alias_names(name, text, end):
             n = len(self.entries)
             r = next((r for r in longs if set(a) <= set(r)), None)
-            if _canon(a) not in self.cfwd and r:  # 假品牌＋一個字（台積電 → 麒碩X）：看得出是同一家，又跟全名的假品牌分得開（兩種寫法都出現時才還原得回來）
+            if _canon(a) not in self.cfwd and r:  # 假品牌＋一個字（台積電 → 汐嵐X）：看得出是同一家，又跟全名的假品牌分得開（兩種寫法都出現時才還原得回來）
                 self._add(a, self._fresh(lambda: self.fwd[r] + self.rng.choice(ORG_CHARS), text), "ORG_ALIAS")
             elif _canon(a) not in self.cfwd:
                 self._add(a, self._org(a, text), "ORG")
@@ -651,13 +707,25 @@ class Obfuscator:
                     self.eshift.setdefault(key, extra)
             return new or _shape(rng, s)
         hw = s.translate(_FW2HW)
-        if re.fullmatch(r"[A-Z][12]\d{8}", hw):  # 身分證：首字母、性別碼不變，檢查碼正確；全形的（Ａ１２３…）換完照樣是全形
-            for _ in range(20):
-                v = fake_id(rng, hw[0])
-                if v[1] == hw[1]:
-                    break
+        if re.fullmatch(r"[A-Z][12]\d{8}|[A-Z][89]\d{8}|[A-Z][A-D]\d{8}", hw):  # 身分證、新舊式居留證：首字母、第二碼不變，檢查碼正確；全形的換完照樣是全形
+            v = fake_id(rng, hw[0], hw[1])
             return v if hw == s else v.translate(_HW2FW_ALL)
-        return _shape(rng, s, keep=_keep_head(s) if typ == "NUMBER" else 0)
+        out = _shape(rng, s, keep=_keep_head(s) if typ == "NUMBER" else 0)
+        d, digits = re.sub(r"\D", "", hw), [i for i, ch in enumerate(out) if ch.isdigit() or ch in _FW]
+        fix = lambda i, v: out[:i] + (_HW2FW[v] if out[i] in _FW else v) + out[i + 1:]
+        if re.fullmatch(r"0[2-8]\d{7,8}", d) and re.search(r"[-()（）\s]", s) and len(digits) > 2:  # 市話：區碼後面第一碼是 2～9
+            i = digits[2]
+            if out[i] in "01０１":
+                out = fix(i, rng.choice("23456789"))
+        for check in (ubn_ok, luhn_ok):  # 統一編號、信用卡號：原值的檢查碼對，假值也要對（只改最後一碼）
+            if check(d) and digits:
+                out = next((o for o in (fix(digits[-1], str(k)) for k in rng.sample(range(10), 10)) if check(re.sub(r"\D", "", o.translate(_FW2HW)))), out)
+                if not check(re.sub(r"\D", "", out.translate(_FW2HW))):  # 統一編號只改最後一碼不一定湊得出來：整串重抽
+                    for _ in range(50):
+                        out = _shape(rng, s)
+                        if check(re.sub(r"\D", "", out.translate(_FW2HW))):
+                            break
+        return out
 
     # ── 主流程 ──────────────────────────────────────────────
     def pseudonymize(self, text):
@@ -694,7 +762,13 @@ class Obfuscator:
             self.spans = self._code.spans
             return fake, entries
         legal = self.mode == "legal"
+        if self._applied:
+            self._load()
+            self._edays()
+        self._applied, self._lgchar = True, {}
         spans = self._reconcile(text, spans)
+        spans = spans + self._revive(text, spans)
+        self._surname_check(text, spans)
         # 原文裡的日期：假日期跟別人的真日期撞成同一天，AI 回覆還原時會連鎖換錯（甲的假生日＝乙的真生日）
         found = [p for p in (_parse_date(m.group(0)) for rx in _BDAY_RX for m in rx.finditer(text)) if p]
         self.text_md = {p[1:] for p in found}
@@ -704,15 +778,18 @@ class Obfuscator:
                    if a not in _places_set() and a not in _common(300)}  # 大同、統一這種別名不拿來推翻保留（大同區戶政事務所）
         kept = lambda s: (s["type"] in ("PERSON_KEEP", "ORG_KEEP") or (legal and s["type"] == "DATE_EVENT")) and not (
             s["type"] == "ORG_KEEP" and any(a in _canon(text[s["start"]:s["end"]]) for a in aliases)) and (
-            _canon(text[s["start"]:s["end"]]) not in self.cfwd)  # 同一案件前面的文件已經判定要換的值（例如生日），這份也照換
+            _canon(text[s["start"]:s["end"]]) not in self.cfwd and _canon(text[s["start"]:s["end"]]) not in self.retired)  # 同一案件前面的文件已經判定要換的值（例如生日），這份也照換
         masked = {_canon(text[s["start"]:s["end"]]) for s in spans if not kept(s)}
         # 同一個值只要有一處要遮，每一處都遮（隱私優先，也避免「一處換了一處沒換」讓 AI 以為前後矛盾）
         keep = [(s["start"], s["end"]) for s in spans if kept(s) and _canon(text[s["start"]:s["end"]]) not in masked]
         todo = [s for s in spans if (s["start"], s["end"]) not in keep]
         persons = [text[s["start"]:s["end"]] for s in spans if s["type"].startswith("PERSON")]
         avoid = {p[:2] for p in persons} | {p[:1] for p in persons}
-        # 先排全名，讓姓名表先建好（只叫名字、綽號才對得上）
-        order = sorted(todo, key=lambda s: (s["type"] != "PERSON" or s.get("kind") != "full", s["start"]))
+        # 先排全名（含英文名、音譯名），讓姓名表先建好（只叫名字、綽號才對得上）；人名都排在機構前面（Alice工作室、阿明工作室跟著人名換）；
+        # 機構長的先排：簡稱（台積電）比全名先出現時，全名先建好別名，簡稱才跟著全名換
+        full = lambda s: s["type"] == "PERSON" and (s.get("kind") == "full" or re.search(r"[A-Za-z·‧・．]", text[s["start"]:s["end"]]))
+        rank = lambda s: 0 if full(s) else 1 if s["type"].startswith("PERSON") else 2 if s["type"] in ("ORG", "ORG_KEEP") else 3
+        order = sorted(todo, key=lambda s: (rank(s), -(s["end"] - s["start"]) if rank(s) == 2 else 0, s["start"]))
         # 生日（要有年份）：模型在一處判定的那一天，其他寫法也當生日換（同案件前面文件判過的也算）
         bdays = {p for p in [_parse_date(text[s["start"]:s["end"]]) for s in todo if s["type"] == "DATE"]
                  + [_parse_date(e["original"]) for e in self.entries if e["type"] == "DATE"] if p and p[0] is not None}
@@ -725,30 +802,27 @@ class Obfuscator:
             if typ in ("NUMBER", "CODE") and is_bday(orig) or typ == "DATE_EVENT" and _parse_date(orig) in bdays:
                 typ = "DATE"  # 同一天在別處被判成生日（0750217 被判成號碼、92年1月20日同時是事件日期）：照生日換，年份不變、假值對得上
             person = typ in ("PERSON", "PERSON_KEEP")
-            if c in self.cfwd:  # 同一個值（寫法只差空白、全半形）→ 同一個假值
+            if c in self.cfwd and (not person or self.ctype.get(c) == "PERSON"):  # 同一個值（寫法只差空白、全半形）→ 同一個假值；模型標成人名的只沿用人名的對照
                 fake = self.cfwd[c]
             elif person:  # 人名一律走姓名對照表（fwd 裡同一個字可能是機構的品牌字、地號，類型不對）；保留的人名因為別處要遮而一起遮時也一樣
                 fake = self._person(orig, s.get("kind", "full"), text, avoid)
                 if fake != self.sur.get(orig) and fake != self.given.get(orig):  # 只有姓、只有名字的稱呼：姓名對照表已經記了，不重複登錄
                     self._put(orig, fake, "PERSON")
-            elif orig in self.fwd:
+            elif orig in self.fwd and orig not in self.comp:
                 fake = self.fwd[orig]
             elif typ in ("ORG", "ORG_KEEP"):
                 fake = self._add(orig, self._org(orig, text), "ORG")
             else:
+                n = len(self.entries)
                 fake = self._add(orig, self._fresh(lambda: self._pii(orig, typ, text), text), typ)
+                if typ == "DATE_EVENT" and len(self.entries) > n and _parse_date(orig) in self.eshift:
+                    self.entries[-1]["shift"] = self.shift + self.eshift[_parse_date(orig)]  # 實際挪的天數：之後的文件照用
             # 沿用的假名剛好是這份原文裡的真人名（前一份的假名＝這一份的法官）：這份另外取一個。單字的假值到處都可能出現，
             # 只有姓時看「假姓＋稱謂」有沒有撞到（曹君琪的「曹君」）；單字暱稱沿用原本的假字，靠「婷姐→婉姐」這類前後文還原
-            collide = fake in text if len(fake) >= 2 else orig in self.sur and any(fake + t in text for t in RESTORE_TITLES)
+            collide = (fake in text or fake in self.dead) if len(fake) >= 2 else orig in self.sur and any(fake + t in text for t in RESTORE_TITLES)
             if person and collide:
                 if orig in self.sur:  # 只有姓（林小姐的「林」）：另取一個假姓，登錄成新的姓對照
-                    used = set(self.sur.values()) | {e["fake"] for e in self.entries if e["type"] == "SURNAME"}
-                    safe = list(SAFE_SURNAMES) if len(orig) == 1 else [a + b for a in SAFE_SURNAMES for b in SAFE_SURNAMES if a != b]
-                    rest = [x for x in sorted(SURNAMES) if len(x) == len(orig)]
-                    ok = lambda x: x not in used and x not in text and x != orig
-                    fake = next((x for x in self.rng.sample(safe, len(safe)) if ok(x)), None) or next(x for x in self.rng.sample(rest, len(rest)) if ok(x))
-                    self.sur[orig] = self.fwd[orig] = fake
-                    self.entries.append({"fake": fake, "original": orig, "type": "SURNAME", **({"bare": True} if fake in SAFE_SURNAMES else {})})
+                    fake = self._resurname(orig, text)
                 else:
                     fake = self._fresh(lambda: self._rename(orig, s.get("kind", "full")), text)
                     self.entries.append({"fake": fake, "original": orig, "type": "PERSON"})
@@ -767,7 +841,10 @@ class Obfuscator:
                         if len(core) > sl:
                             self.given[core[sl:]] = fcore[sl:]
                             for a, b in zip(core[sl:], fcore[sl:]):  # 逐字對應只補還沒有的字，不蓋掉別人已經用的對應（不然會撞成同一個假字）
-                                self.gchar.setdefault(a, b)
+                                if a != b:
+                                    self.gchar.setdefault(a, b)
+                                if a != b:  # 這份文件裡的綽號、只叫名字跟著改配的新名字（阿明 → 阿豐）；同一個字不對到自己
+                                    self._lgchar[a] = b
                             self._put(core[sl:], fcore[sl:], "GIVEN")
             if s["type"] == "PERSON" and fake == self.sur.get(orig):  # 只有姓的稱呼：把文件裡接在後面的職稱也記下（甘會計師、邱主委、楊警官），AI 回覆沿用時換得回來
                 for k in (2, 3):
@@ -786,20 +863,9 @@ class Obfuscator:
             if typ in ("ORG", "ORG_KEEP"):
                 self._org_aliases(orig, text, s["end"])
         # 同一個值在文件別處也換（模型漏抓的重複提及；中間夾空白也算）；太短的不換，避免誤傷
-        places = _places_set()
-        for c, fake in list(self.cfwd.items()):
-            typ = self.ctype[c]  # 日期也要：同一個日期一處換了、一處沒換，AI 會說「日期前後矛盾」
-            if typ in ("ORG_BRAND", "ORG_ALIAS"):  # 品牌單獨出現（OCR 弄亂的公司章、模型漏抓的簡稱）也換；詞典裡的詞、地名不換（信義、玉山）
-                if len(c) < 2 or c in places or c in _common(300 if typ == "ORG_ALIAS" else 1):  # 明講的別名只擋常用詞（統一、中華）
-                    continue
-            elif len(c) < (3 if typ == "PERSON" else 5):
-                continue
-            sep = _JUNK + "{0,3}" if typ in ("PERSON", "PERSON_KEEP") else r"\s?"  # 人名字間夾多個空白、OCR 雜點也算（Rowan␣␣Wu、陳 ｜美玲）
-            word = c.isascii() and c.isalpha()  # 整個是英文字母的值（Sam）：不比對到更長的英文字中間（Sample），跟 restore 同一套邊界
-            rx = re.compile(("(?<![0-9０-９])" if c[0].isdigit() else r"(?<![A-Za-z])" if word else "")
-                            + sep.join(f"[{ch}{_HW2FW.get(ch, '')}]" if ch.isdigit() else re.escape(ch) for ch in c)
-                            + ("(?![0-9０-９])" if c[-1].isdigit() else r"(?![A-Za-z])" if word else ""))  # 數字值不比對到更長的數字中間（75/02/17 不是 075/02/17 的一部分）
-            for m in rx.finditer(text):
+        for c, fake in list(self.cfwd.items()):  # 日期也要：同一個日期一處換了、一處沒換，AI 會說「日期前後矛盾」
+            rx = _value_rx(c, self.ctype[c])
+            for m in rx.finditer(text) if rx else ():
                 iv = m.span()
                 if not any(a < iv[1] and b > iv[0] for a, b in list(repl) + keep):
                     repl[iv] = fake
@@ -830,24 +896,91 @@ class Obfuscator:
         _guard(text, fake, self.spans, self.entries)
         return fake, [dict(e) for e in self.entries]  # 回傳獨立的一份：同一個 Obfuscator 處理下一份文件時，不會改到這份已交出去的對照表
 
+    def _revive(self, text, spans):
+        """前面判定要遮、但假值停用了的值（王小明的假名魏文翔撞到下一份的真人）：這份模型漏抓時照樣遮、另配假值，真名才不會留在文字裡。"""
+        taken, out = [(s["start"], s["end"]) for s in spans], []
+        for c, typ in self.retired.items():
+            rx = _value_rx(c, typ)
+            for m in rx.finditer(text) if rx else ():
+                if not any(a < m.end() and b > m.start() for a, b in taken):
+                    taken.append(m.span())
+                    t = "ORG" if typ.startswith("ORG") else typ
+                    out.append({"start": m.start(), "end": m.end(), "type": t, "kind": "full" if t == "PERSON" else "org" if t == "ORG" else "date" if "DATE" in t else "num"})
+        rx = re.compile("(" + "|".join(map(re.escape, sorted(self.retired_sur, key=len, reverse=True))) + ")(?=" + "|".join(PROP_TITLES) + ")") if self.retired_sur else None
+        for m in rx.finditer(text) if rx else ():  # 停用的姓（王→魏 撞到法官魏某）：「王先生」照樣遮，另配假姓
+            if not any(a < m.end() and b > m.start() for a, b in taken):
+                taken.append(m.span())
+                out.append({"start": m.start(), "end": m.end(), "type": "PERSON", "kind": "partial"})
+        return out
+
     def _rename(self, s, kind="full"):
         """另取一個同字數的假名，不經過姓名對照表（沿用的假名撞到這份原文裡的真名時用）。只有名字的稱呼（阿婷的「婷」）全用名字常用字。"""
         if re.search(r"[A-Za-z]", s):
             return _shape_words(self.rng, s)
         n = sum(c not in " 　\n" for c in s)
-        taken = set(self.gchar.values()) | set(self.sur.values())  # 已經對應給別的字、別的姓的假字不用（單字暱稱才不會撞成同一個）
+        taken = set(self.gchar.values()) | set(self.sur.values()) | set(s)  # 已經對應給別的字、別的姓的假字不用（單字暱稱才不會撞成同一個）；原名裡的字也不用（不會對到自己）
         given_pool = [x for x in GIVEN_M + GIVEN_F if x not in taken] or [x for x in _extra_given() if x not in taken]
         head = [] if kind in ("nick", "given", "given2") else [self.rng.choice([x for x in SAFE_SURNAMES if x not in taken] or SAFE_SURNAMES)]
         it = iter(head + [self.rng.choice(given_pool) for _ in range(n - len(head))])
         return "".join(c if c in " 　\n" else next(it) for c in s)
+
+    def _resurname(self, orig, text):
+        """另取一個假姓（沿用的假姓撞到這份原文裡別人的真姓），登錄成新的姓對照。"""
+        used = set(self.sur.values()) | {e["fake"] for e in self.entries if e["type"] == "SURNAME"}
+        safe = list(SAFE_SURNAMES) if len(orig) == 1 else [a + b for a in SAFE_SURNAMES for b in SAFE_SURNAMES if a != b]
+        rest = [x for x in sorted(SURNAMES) if len(x) == len(orig)]
+        ok = lambda x: x not in used and x not in text and x != orig
+        fake = next((x for x in self.rng.sample(safe, len(safe)) if ok(x)), None) or next(x for x in self.rng.sample(rest, len(rest)) if ok(x))
+        self.sur[orig] = self.fwd[orig] = fake
+        self.comp.add(orig)
+        self.entries.append({"fake": fake, "original": orig, "type": "SURNAME", **({"bare": True} if fake in SAFE_SURNAMES and fake not in text else {})})
+        return fake
+
+    def _surname_check(self, text, spans):
+        """沿用的假姓在這份原文裡是別人的真姓（前一份王→曹，這份有「曹小姐是法官」）：處理人名之前先換姓，
+        這個姓的全名也一起換（不然會出現「曹文翔到庭，紀先生表示同意」，同一個人兩個姓）。"""
+        surs = set()
+        for s in spans:
+            if s["type"].startswith("PERSON"):
+                core = re.sub(r"[ 　\n]", "", text[s["start"]:s["end"]])
+                if surname_len(core):
+                    surs.add(core[:surname_len(core)])
+        for orig in [o for o in self.sur if o in surs]:
+            old = self.sur[orig]
+            if any(old + t in text for t in RESTORE_TITLES):
+                new = self._resurname(orig, text)
+                for o, f in [(o, f) for o, f in self.fwd.items() if o != orig and self.ctype.get(_canon(o)) == "PERSON"]:
+                    if o.startswith(orig) and f.startswith(old):
+                        self._put(o, new + f[len(old):], "PERSON")  # 全名改用新的姓（名字的對應不變）；這份沒抓到的人也已經換好
+                    elif o[:1] in "老小" and o[1:] == orig and f[1:] == old:
+                        self._put(o, f[:1] + new, "PERSON")  # 老王、小王也跟著改
+                for o in [o for o in self.fwd if orig in o and self.ctype.get(_canon(o)) == "ORG"]:
+                    nf = self._org(o, text)
+                    if nf != self.fwd[o]:
+                        self._put(o, nf, "ORG")  # 名稱裡的姓、人名（王記工作室、王小明工作室）也跟著新的姓
 
     def _put(self, orig, fake, typ):
         """登錄一筆對照；同一個原值這份換了新的假值時也記下（舊的那筆留給前面的文件還原）。"""
         if self.fwd.get(orig) != fake or not any(e["original"] == orig and e["fake"] == fake and e["type"] == typ for e in self.entries):
             self.fwd[orig] = fake
             self.entries.append({"fake": fake, "original": orig, "type": typ})
+        (self.comp.add if typ in _NOT_VALUE else self.comp.discard)(orig)
         if typ not in _NOT_VALUE:
             self.cfwd[_canon(orig)], self.ctype[_canon(orig)] = fake, typ
+
+
+def _value_rx(c, typ):
+    """文件裡同一個值的其他出現（模型漏抓的重複提及；中間夾空白也算）。太短、太常見的不比對（免得誤傷），回 None。"""
+    if typ in ("ORG_BRAND", "ORG_ALIAS"):  # 品牌單獨出現（OCR 弄亂的公司章、模型漏抓的簡稱）也換；詞典裡的詞、地名不換（信義、玉山）
+        if len(c) < 2 or c in _places_set() or c in _common(300 if typ == "ORG_ALIAS" else 1):  # 明講的別名只擋常用詞（統一、中華）
+            return None
+    elif len(c) < (3 if typ == "PERSON" else 5):
+        return None
+    sep = _JUNK + "{0,3}" if typ in ("PERSON", "PERSON_KEEP") else r"\s?"  # 人名字間夾多個空白、OCR 雜點也算（Rowan␣␣Wu、陳 ｜美玲）
+    word = c.isascii() and c.isalpha()  # 整個是英文字母的值（Sam）：不比對到更長的英文字中間（Sample），跟 restore 同一套邊界
+    return re.compile(("(?<![0-9０-９])" if c[0].isdigit() else r"(?<![A-Za-z])" if word else "")
+                      + sep.join(f"[{ch}{_HW2FW.get(ch, '')}]" if ch.isdigit() else re.escape(ch) for ch in c)
+                      + ("(?![0-9０-９])" if c[-1].isdigit() else r"(?![A-Za-z])" if word else ""))  # 數字值不比對到更長的數字中間（75/02/17 不是 075/02/17 的一部分）
 
 
 def _guard(text, fake, spans, entries):
@@ -922,6 +1055,8 @@ def _restore_hits(text, mapping):
         if e.get("code") and _BARE_CODE.fullmatch(e["fake"]):
             codes.setdefault(e["fake"], (e["original"], e))
             continue
+        if e.get("code") and re.fullmatch(r"[A-Z]\d*", e["fake"]):  # 單獨的機構字母：只走下面「被告A」這類稱呼的規則
+            continue
         if e["fake"] and e["type"] not in ("SURNAME", "LOT", "GIVEN_CHAR", "ORG_WORD", "ORG_CHAR") and not (e["type"] == "PERSON" and len(e["fake"]) == 1):
             pairs[e["fake"]] = (e["original"].replace("\r", "").replace("\n", ""), e)
     for e in mapping:
@@ -968,10 +1103,46 @@ def _restore_hits(text, mapping):
     words = _common(1) if codes else set()  # 詞典裡的詞（甲板、丁字、甲方）：代號跟後一個字組成一般詞就不換
     for m in re.finditer("|".join(map(re.escape, sorted(codes, key=len, reverse=True))), text) if codes else ():
         s, e = m.span()  # 單獨的代號：後面接數字（甲23）、接成一般詞（甲方、甲說、甲板）、前面接成一般詞（指甲、布丁）都不換；
-        nxt = text[e:e + 1]  # 後面接另一個代號（甲乙二人）或「未、等」（甲未到庭、甲等人；詞典裡另有乙未年、甲等）照換
+        nxt = re.sub(r"\s", "", text[e:e + 8])[:1]  # 後面的字不管空白、換行（甲 方）；後面接另一個代號（甲乙二人）或「未、等」（甲未到庭、甲等人；詞典裡另有乙未年、甲等）照換
         word = len(m.group(0)) == 1 and m.group(0) + nxt in words and nxt not in codes and nxt not in "未等"
         if not (nxt.isdigit() or nxt in _CODE_NEXT_BLOCK or text[s - 1:s] in _CODE_PREV_BLOCK or word):
             hits.append((s, e, *codes[m.group(0)]))
+    letters = {}  # 代號版的機構字母（AI 回覆只寫「A表示」）：換回全名；前後要是中文（英文句子的 A 不換），後面接成 A棟、A級的不換
+    for e in mapping:
+        if e.get("code") and e["type"] == "ORG" and re.fullmatch(r"[A-Z]\d*", str(e.get("c", ""))):
+            letters.setdefault(e["c"], (e["original"], e))
+    words = _common(1) if letters else set()  # 詞典裡的詞（A股、A型）：字母跟後一個字組成一般詞就不換
+    an = "A-Za-z0-9Ａ-Ｚａ-ｚ０-９"
+    joined = re.compile(rf"\s*[/+&\-／＋＆－]\s*[{an}]")  # A/B測試、A／B、A + B：跟別的字母、數字用符號連成一個詞，不是代號
+    for m in re.finditer(rf"(?<![{an}])(" + "|".join(sorted(letters, key=len, reverse=True)) + rf")(\s*(?:股份)?有限公司|\s*公司)?(?![{an}])", text) if letters else ():
+        s, e = m.span()  # 單獨的 A 只在「被告A」「下稱A」這類稱呼後面換（維生素A、A肝、A棟、A股不換）
+        if joined.match(text, s + len(m.group(1))) or re.search(rf"[{an}]\s*[/+&\-／＋＆－]\s*$", text[max(0, s - 8):s]):
+            continue
+        orig, ent = letters[m.group(1)]
+        tpl = ent.get("tpl", "")
+        head, _, rest = tpl.partition("{c}")
+        core, after = re.sub(r"\s", "", orig), re.sub(r"\s", "", text[e:e + 12])  # 後面的字不管空白、換行（A 棟、A\n科技）
+        # 對照表只有保留品牌位置的樣板才存 tpl（澄嶼顧問股份有限公司 → {c}顧問股份有限公司）；退回的簡化樣板（陳記汐嵐科技有限公司 → A公司）不存，不拿來拆品牌
+        brand = core[len(head):len(core) - len(rest)] if tpl and core.startswith(head) and core.endswith(rest) and len(core) > len(head) + len(rest) else None
+        if m.group(2) and brand:  # 「A公司」「A有限公司」：字母換回品牌、字尾照 AI 的寫法（澄嶼公司、汐嵐有限公司；只標到品牌的「汐嵐」也一樣）
+            hits.append((s, s + len(m.group(1)), brand, ent))
+        elif m.group(2):  # 退回的簡化樣板、0.2.0 的對照表（假值就是 A公司）：連同字尾換回全名
+            hits.append((s, e, orig, ent))
+        elif re.match(rf"[{an}]", after) or re.search(rf"[{an}]\s+$", text[max(0, s - 6):s]):
+            continue  # 空白隔開的編號（A 1棟、3 A）不是代號
+        elif after[:1] in _LETTER_NEXT_BLOCK or m.group(1) + after[:1] in words:
+            continue  # 字母跟後一個字是一般詞（A棟、A股、X光、A型）
+        elif brand and len(rest) >= 2 and after.startswith(rest[:2]):
+            hits.append((s, e, brand, ent))  # 接的是這家名稱本身的字尾（汐嵐科技股份有限公司寫成「A科技」）：字母只換回品牌（汐嵐科技）
+        else:  # 其餘只在「被告A」「下稱A」這類稱呼後面換（維生素A食品、E化工作流程不換）
+            role = next((r for r in _LETTER_ROLES if re.search(re.escape(r) + r"[「『“\"]?\s*$", text[max(0, s - len(r) - 3):s])), None)
+            if not role:
+                continue
+            term = role in ("下稱", "簡稱")  # 下稱A）：定義的詞就是 A；下稱A酸、下稱A食品是別的詞
+            if not term and brand and any(after.startswith(t) for t in _ORG_TOKENS if len(t) >= 2):
+                hits.append((s, e, brand, ent))  # 被告A集團、被告A科技：字母只換回品牌、後面照留（澄嶼集團），不會變成「全名＋集團」
+            elif (after[:1] in _TERM_END or not after) if term else not (len(after) >= 2 and after[:2] in core):
+                hits.append((s, e, orig, ent))  # 拆不出品牌時，接著名稱一段的（A科技）不換
     for e in mapping:  # 地號：AI 自己寫的「同段537-1地號」「537地號」，後面接著地號／建號才換（單獨的數字不動）
         if e["type"] == "LOT":
             hits += [(m.start(), m.end(), e["original"], e) for m in re.finditer(rf"(?<![0-9]){re.escape(e['fake'])}(?=(?:-\d+)?\s?[地建]號)", text)]
@@ -1187,25 +1358,25 @@ def _demo():
     assert restore(f"{s1}取車後，{s2}作證；{s1}：刮痕非其所為。", m8) == "吳取車後，張作證；吳：刮痕非其所為。"
     acct = next(e["fake"] for e in m5 if e["type"] == "NUMBER")
     assert restore(acct.translate(str.maketrans(_FW, "0123456789")).replace("-", ""), m5) == "０１３-１２３４５６７８"
-    t9 = ("甲方岱昀顧問股份有限公司（下稱岱昀公司）與岱昀科技股份有限公司台中分公司合作，款項匯入玉山銀行。陳記商行負責人陳先生同意；"
-          "雲端之森社區管理委員會、Dai Yun Consulting Co., Ltd.。（印）岱昀黑驗焦熙公息")  # 最後一個是 OCR 弄亂、模型漏抓的公司章
+    t9 = ("甲方澄嶼顧問股份有限公司（下稱澄嶼公司）與澄嶼科技股份有限公司台中分公司合作，款項匯入玉山銀行。陳記商行負責人陳先生同意；"
+          "雲端之森社區管理委員會、Dai Yun Consulting Co., Ltd.。（印）澄嶼黑驗焦熙公息")  # 最後一個是 OCR 弄亂、模型漏抓的公司章
     sp9 = [{"start": t9.index(x), "end": t9.index(x) + len(x), "type": typ, "kind": k} for x, typ, k in (
-        ("岱昀顧問股份有限公司", "ORG", "org"), ("岱昀公司", "ORG", "org"), ("岱昀科技股份有限公司台中分公司", "ORG", "org"),
+        ("澄嶼顧問股份有限公司", "ORG", "org"), ("澄嶼公司", "ORG", "org"), ("澄嶼科技股份有限公司台中分公司", "ORG", "org"),
         ("玉山銀行", "ORG_KEEP", "org"), ("陳記商行", "ORG", "org"), ("雲端之森社區管理委員會", "ORG", "org"),
         ("Dai Yun Consulting Co., Ltd.", "ORG", "org_en"))]
     sp9.append({"start": t9.index("陳先生"), "end": t9.index("陳先生") + 1, "type": "PERSON", "kind": "partial"})
     ob9 = Obfuscator(seed=9)
     f9, m9 = ob9.apply(t9, sp9)
-    b = next(e["fake"] for e in m9 if e["type"] == "ORG_BRAND" and e["original"] == "岱昀")
-    assert "岱昀" not in f9 and all(f"{b}{x}" in f9 for x in ("顧問股份有限公司", "公司）", "科技股份有限公司台中分公司")), f9
+    b = next(e["fake"] for e in m9 if e["type"] == "ORG_BRAND" and e["original"] == "澄嶼")
+    assert "澄嶼" not in f9 and all(f"{b}{x}" in f9 for x in ("顧問股份有限公司", "公司）", "科技股份有限公司台中分公司")), f9
     assert "玉山銀行" in f9 and f"{ob9.sur['陳']}記商行" in f9 and f"{ob9.sur['陳']}先生" in f9, f9
     assert "雲端之森" not in f9 and "社區管理委員會" in f9 and "Dai" not in f9 and "Consulting Co., Ltd." in f9, f9
-    assert restore(f9, m9) == t9 and restore_exact(f9, ob9.spans).replace(b, "岱昀") == t9, (restore(f9, m9), f9)
-    assert restore(f"{b}表示同意", m9) == "岱昀表示同意", "AI 回覆只寫品牌也要換得回來"
+    assert restore(f9, m9) == t9 and restore_exact(f9, ob9.spans).replace(b, "澄嶼") == t9, (restore(f9, m9), f9)
+    assert restore(f"{b}表示同意", m9) == "澄嶼表示同意", "AI 回覆只寫品牌也要換得回來"
     t15 = ("原告王小明與被告台灣積體電路製造股份有限公司（下稱台積電）間請求給付資遣費事件。原告任職於台積電期間遭解僱，台積電應給付資遣費；"
-           "被告佳穎精密股份有限公司（下稱被告公司）亦同。快樂幼兒園（以下簡稱本園）表示本園無過失。")  # 當事人的別名要跟著換；泛稱的別名不動
+           "被告璟嵐精密股份有限公司（下稱被告公司）亦同。快樂幼兒園（以下簡稱本園）表示本園無過失。")  # 當事人的別名要跟著換；泛稱的別名不動
     sp15 = [{"start": t15.index(x), "end": t15.index(x) + len(x), "type": typ, "kind": k} for x, typ, k in (
-        ("王小明", "PERSON", "full"), ("台灣積體電路製造股份有限公司", "ORG", "org"), ("佳穎精密股份有限公司", "ORG", "org"),
+        ("王小明", "PERSON", "full"), ("台灣積體電路製造股份有限公司", "ORG", "org"), ("璟嵐精密股份有限公司", "ORG", "org"),
         ("快樂幼兒園", "ORG", "org"))]
     ob15 = Obfuscator(seed=15)
     f15, m15 = ob15.apply(t15, sp15)
@@ -1312,9 +1483,9 @@ def _demo():
     assert len({e["fake"] for e in m26 if e["type"] == "ORG"}) == 2 and restore(f26, m26) == t26, f26
     m27 = [{"original": "Acme", "fake": "Huan", "type": "ORG_WORD"}, {"original": "Huan", "fake": "Hsie", "type": "ORG_WORD"}]  # 前一份的假字＝這一份的真字
     assert restore("Hsie Trading 與 Huan Consulting", m27) == "Huan Trading 與 Acme Consulting"  # 一次換完，不連鎖
-    t28 = "甲方岱昀顧問股份有限公司（下稱岱昀）"  # 別名用到的品牌、單字品牌：下一份文件換成同一個假字
+    t28 = "甲方澄嶼顧問股份有限公司（下稱澄嶼）"  # 別名用到的品牌、單字品牌：下一份文件換成同一個假字
     f28, m28 = Obfuscator(seed=3).apply(t28, [{"start": 2, "end": 12, "type": "ORG", "kind": "org"}])
-    f29, _ = Obfuscator(seed=9, mapping=m28).apply("乙方岱昀科技股份有限公司", [{"start": 2, "end": 12, "type": "ORG", "kind": "org"}])
+    f29, _ = Obfuscator(seed=9, mapping=m28).apply("乙方澄嶼科技股份有限公司", [{"start": 2, "end": 12, "type": "ORG", "kind": "org"}])
     f30, m30 = Obfuscator(seed=1).apply("被告德記商行", [{"start": 2, "end": 6, "type": "ORG", "kind": "org"}])
     f31, _ = Obfuscator(seed=5, mapping=m30).apply("被告德記食品行", [{"start": 2, "end": 7, "type": "ORG", "kind": "org"}])
     assert f29[2:4] == f28[2:4] and f31[2] == f30[2] and f30[3] == "記", (f28, f29, f30, f31)
@@ -1361,9 +1532,9 @@ def _demo():
     t46 = "聯絡手機0912345678/0987654321。"  # 兩支用斜線連著的電話：都換得回來
     f46, m46 = Obfuscator(seed=0).apply(t46, [{"start": 4, "end": 14, "type": "NUMBER", "kind": "num"}, {"start": 15, "end": 25, "type": "NUMBER", "kind": "num"}])
     assert restore(f46, m46) == t46, (f46, restore(f46, m46))
-    t47 = "岱昀科技有限公司與麒碩科技有限公司合作。"  # 假品牌不能剛好是原文裡另一家公司
+    t47 = "澄嶼科技有限公司與汐嵐科技有限公司合作。"  # 假品牌不能剛好是原文裡另一家公司
     f47, m47 = Obfuscator(seed=0).apply(t47, [{"start": 0, "end": 8, "type": "ORG", "kind": "org"}, {"start": 9, "end": 17, "type": "ORG_KEEP", "kind": "org"}])
-    assert f47.count("麒碩科技有限公司") == 1 and restore(f47, m47) == t47, f47
+    assert f47.count("汐嵐科技有限公司") == 1 and restore(f47, m47) == t47, f47
     ob48 = Obfuscator(seed=0)  # 同一個 Obfuscator 連續處理兩份：第一份交出去的對照表不會被第二份改到
     f48, m48 = ob48.apply("被告王小明到庭。", [{"start": 2, "end": 5, "type": "PERSON", "kind": "full"}])
     ob48.apply(f"法官{f48[2:5]}審理。", [{"start": 2, "end": 5, "type": "PERSON_KEEP", "kind": "full"}])
@@ -1377,6 +1548,179 @@ def _demo():
         _property_check(seed=s)
     fake2, _ = Obfuscator(mode="legal", seed=1).apply(text, spans)
     assert "2023年3月5日" in fake2
+    # ── 0.2.1 的回歸測試 ──
+    sp1 = lambda t, x, typ="PERSON", kind="full", nth=0: {"start": [m.start() for m in re.finditer(re.escape(x), t)][nth], "end": [m.start() for m in re.finditer(re.escape(x), t)][nth] + len(x), "type": typ, "kind": kind}
+    # 撞名改配全名後，同一份的綽號跟著新名字（阿明不是舊假名的字）
+    for sd in range(10):
+        o1 = Obfuscator(seed=sd)
+        _, mp1 = o1.apply("原告王小明到庭。", [sp1("原告王小明到庭。", "王小明")])
+        F = o1.fwd["王小明"]
+        t2 = f"法官{F}審理。原告王小明到庭，大家叫他阿明。"
+        f2, _ = Obfuscator(seed=sd + 50, mapping=mp1).apply(t2, [sp1(t2, F, "PERSON_KEEP"), sp1(t2, "王小明"), sp1(t2, "阿明", kind="nick")])
+        G = f2[f2.index("原告") + 2:f2.index("到庭，")]
+        assert G != F and f"大家叫他阿{G[-1]}" in f2, (F, f2)
+    # 沿用的假姓撞到這份別人的真姓（X小姐是法官）：全名和只寫姓的稱呼用同一個新姓
+    for sd in range(10):
+        o1 = Obfuscator(seed=sd)
+        _, mp1 = o1.apply("被告王小明到庭。", [sp1("被告王小明到庭。", "王小明")])
+        F = o1.fwd["王小明"]
+        t2 = f"被告王小明到庭，王先生表示同意；{F[0]}小姐是法官。"
+        f2, _ = Obfuscator(seed=sd, mapping=mp1).apply(t2, [sp1(t2, "王小明"), sp1(t2, "王", kind="partial", nth=1)])
+        G = f2[2:2 + len(F)]
+        assert G[0] != F[0] and f"{G[0]}先生表示同意" in f2, (F, f2)
+    # 英文序數日期（一般模式）：日子換了，st／nd／rd／th 也對
+    te = "Leave from December 31st, 2023 to January 1st, 2024."
+    fe, _ = Obfuscator(seed=2, mode="general").apply(te, [sp1(te, "December 31st, 2023", "DATE_EVENT", "date"), sp1(te, "January 1st, 2024", "DATE_EVENT", "date")])
+    for n, suf in re.findall(r"(\d+)(st|nd|rd|th)\b", fe):
+        n = int(n)
+        assert suf == ("th" if 11 <= n % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")), fe
+    # 上市櫃簡稱比全名先出現：簡稱跟著全名換成同一個
+    tt = "台積電公告後，台灣積體電路製造股份有限公司即付款，台積電並無遲延。"
+    ft, mt = Obfuscator(seed=1).apply(tt, [sp1(tt, "台積電", "ORG", "org"), sp1(tt, "台灣積體電路製造股份有限公司", "ORG", "org"), sp1(tt, "台積電", "ORG", "org", 1)])
+    short = {e["fake"] for e in mt if e["original"] == "台積電" and not e.get("ambiguous")}
+    assert "台積電" not in ft and len(short) == 1 and ft.count(next(iter(short))) >= 2, (ft, short)
+    # 同一個 Obfuscator 連續處理：停用的對照不再沿用（第三份不會再用撞到法官真名的假名，也還原得回來）
+    for sd in range(10):
+        o = Obfuscator(seed=sd)
+        o.apply("原告王小明到庭。", [sp1("原告王小明到庭。", "王小明")])
+        F = o.fwd["王小明"]
+        o.apply(f"法官{F}審理。", [sp1(f"法官{F}審理。", F, "PERSON_KEEP")])
+        f3, m3 = o.apply("原告王小明再次到庭。", [sp1("原告王小明再次到庭。", "王小明")])
+        assert F not in f3 and restore(f3, m3) == "原告王小明再次到庭。", (F, f3)
+    # 人名和公司同字（陳璟嵐、璟嵐科技）：名字「璟嵐」只是人名組件，擋不住「下稱璟嵐」的機構別名（模型沒標、標成機構的都跟公司走）；
+    # 模型標成人名的「璟嵐」照人名換（不推翻模型的判斷：朋友稱陳璟嵐為璟嵐）
+    tj = "原告陳璟嵐與璟嵐科技有限公司（下稱璟嵐）間事件，璟嵐應給付。朋友稱陳璟嵐為璟嵐。"
+    fj, mj = Obfuscator(seed=0).apply(tj, [sp1(tj, "陳璟嵐"), sp1(tj, "璟嵐科技有限公司", "ORG", "org"), sp1(tj, "璟嵐", "ORG", "org", 3),
+                                          sp1(tj, "陳璟嵐", nth=1), sp1(tj, "璟嵐", kind="given", nth=5)])
+    given_fake = next(e["fake"] for e in mj if e["original"] == "璟嵐" and e["type"] == "GIVEN")
+    alias = fj[fj.index("（下稱") + 3:fj.index("）")]
+    assert alias != given_fake and f"{alias}應給付" in fj and fj.endswith(f"為{given_fake}。") and "璟嵐" not in fj, (fj, given_fake)
+    assert restore(fj, mj) == tj
+    # 前一份已經有品牌「璟嵐」（璟嵐科技）：這份人名的「璟嵐」照樣登錄成名字，還原得回來；再處理一次也是同一個假名
+    tb = "被告璟嵐科技有限公司到庭。"
+    _, mb = Obfuscator(seed=0).apply(tb, [sp1(tb, "璟嵐科技有限公司", "ORG", "org")])
+    tp = "原告陳璟嵐到庭，璟嵐主張。"
+    fp, mpp = Obfuscator(seed=1, mapping=mb).apply(tp, [sp1(tp, "陳璟嵐"), sp1(tp, "璟嵐", kind="given", nth=1)])
+    fq, _ = Obfuscator(seed=2, mapping=mpp).apply(tp, [sp1(tp, "陳璟嵐"), sp1(tp, "璟嵐", kind="given", nth=1)])
+    assert restore(fp, mpp) == tp and fq == fp, (fp, fq)
+    # 單獨的假姓在下一份撞到法官（魏昀蓁）而停用，全名魏文翔照用：再下一份的「王先生」「小明」跟全名同一個姓、名字
+    for sd in range(10):
+        o1 = Obfuscator(seed=sd)
+        _, m1 = o1.apply("原告王小明到庭。", [sp1("原告王小明到庭。", "王小明")])
+        tj2 = f"法官{o1.fwd['王小明'][0]}昀蓁審理。"
+        _, m2 = Obfuscator(seed=sd + 1, mapping=m1).apply(tj2, [sp1(tj2, tj2[2:5], "PERSON_KEEP")])
+        t3 = "原告王小明到庭，王先生表示同意，小明亦同。"
+        f3, m3 = Obfuscator(seed=sd + 2, mapping=m2).apply(t3, [sp1(t3, "王小明"), sp1(t3, "王", kind="partial", nth=1), sp1(t3, "小明", kind="given", nth=1)])
+        G = f3[2:5]
+        assert f"，{G[0]}先生" in f3 and f"，{G[1:]}亦同" in f3 and restore(f3, m3) == t3, f3
+    # 改姓時，對照表裡的「老王」也跟著改（全名姚文翔、綽號老姚）
+    for sd in range(10):
+        o1 = Obfuscator(seed=sd)
+        tn = "王小明又稱老王。"
+        _, m1 = o1.apply(tn, [sp1(tn, "王小明"), sp1(tn, "老王", kind="nick")])
+        t2 = f"王小明又稱老王，{o1.sur['王']}小姐是第三人。"
+        f2, m2 = Obfuscator(seed=sd + 1, mapping=m1).apply(t2, [sp1(t2, "王小明"), sp1(t2, "老王", kind="nick")])
+        assert f2[0] == f2[6] != o1.sur["王"] and restore(f2, m2) == t2, f2
+    # 同一個字先是品牌字（陳科技有限公司）、後是姓（陳小明）：各自登錄，模型只標全名時「陳先生」也還原得回來
+    for sd in range(5):
+        o = Obfuscator(seed=sd)
+        tc = "被告陳科技有限公司到庭。"
+        o.apply(tc, [sp1(tc, "陳科技有限公司", "ORG", "org")])
+        tc2 = "陳小明到庭，陳先生同意。"
+        fc2, mc2 = o.apply(tc2, [sp1(tc2, "陳小明")])
+        assert restore(fc2, mc2) == tc2, fc2
+    # 假名撞到下一份的真人而停用（魏文翔是法官）：同一個人之後模型漏抓也照樣遮、另配假名，不會留下真名
+    for sd in range(5):
+        o = Obfuscator(seed=sd)
+        o.apply("原告王小明到庭。", [sp1("原告王小明到庭。", "王小明")])
+        F = o.fwd["王小明"]
+        o.apply(f"法官{F}審理。", [sp1(f"法官{F}審理。", F, "PERSON_KEEP")])
+        f3, m3 = o.apply("王小明再次到庭。", [])
+        f4, _ = Obfuscator(seed=sd, mapping=m3).apply("另案王小明亦到庭。", [])
+        assert "王小明" not in f3 + f4 and F not in f3 and restore(f3, m3) == "王小明再次到庭。", (F, f3, f4)
+    # 姓也一起停用時，模型漏抓的「王先生」照樣遮（另配假姓）
+    for sd in range(5):
+        o = Obfuscator(seed=sd)
+        o.apply("原告王小明到庭。", [sp1("原告王小明到庭。", "王小明")])
+        F = o.fwd["王小明"]
+        o.apply(f"法官{F}審理。", [sp1(f"法官{F}審理。", F, "PERSON_KEEP")])
+        f5, m5 = o.apply("王先生再次到庭。", [])
+        assert "王" not in f5 and not f5.startswith(F[0]) and restore(f5, m5) == "王先生再次到庭。", (F, f5)
+    # 改姓時，名稱裡有這個姓的機構也跟著改（姚文翔經營姚記工作室）
+    for sd in range(5):
+        o1 = Obfuscator(seed=sd)
+        tw = "王小明經營王記工作室。"
+        _, m1 = o1.apply(tw, [sp1(tw, "王小明"), sp1(tw, "王記工作室", "ORG", "org")])
+        tw2 = f"王小明經營王記工作室，另有{o1.sur['王']}小姐到場。"
+        fw2, mw2 = Obfuscator(seed=sd + 1, mapping=m1).apply(tw2, [sp1(tw2, "王小明"), sp1(tw2, "王記工作室", "ORG", "org")])
+        assert fw2[0] == fw2[5] and restore(fw2, mw2) == tw2, fw2
+    # 假品牌撞到下一份的真公司而停用：全名、新的關係企業、單獨的品牌改用同一個新的假品牌
+    for sd in range(5):
+        o1 = Obfuscator(seed=sd)
+        tb1 = "被告澄嶼顧問股份有限公司到庭。"
+        _, m1 = o1.apply(tb1, [sp1(tb1, "澄嶼顧問股份有限公司", "ORG", "org")])
+        X = o1.fwd["澄嶼"]
+        tb2 = f"證人任職於{X}商行。"
+        _, m2 = Obfuscator(seed=sd + 1, mapping=m1).apply(tb2, [sp1(tb2, f"{X}商行", "ORG_KEEP", "org")])
+        tb3 = "澄嶼建設股份有限公司與澄嶼顧問股份有限公司，澄嶼表示。"
+        fb3, mb3 = Obfuscator(seed=sd + 2, mapping=m2).apply(tb3, [sp1(tb3, "澄嶼建設股份有限公司", "ORG", "org"), sp1(tb3, "澄嶼顧問股份有限公司", "ORG", "org")])
+        assert fb3[:2] == fb3[fb3.index("與") + 1:fb3.index("與") + 3] != X and "澄嶼" not in fb3 and restore(fb3, mb3) == tb3, (X, fb3)
+    # 機構名稱裡的英文名、綽號：人名先處理，機構跟著同一個假名（Alice工作室、阿明工作室）
+    for sd in range(5):
+        ta = "原告Alice經營Alice工作室，阿明工作室由阿明經營。"
+        fa, ma = Obfuscator(seed=sd).apply(ta, [sp1(ta, "Alice", kind="latin"), sp1(ta, "Alice工作室", "ORG", "org"), sp1(ta, "阿明工作室", "ORG", "org"), sp1(ta, "阿明", kind="nick", nth=1)])
+        al, am = fa[2:fa.index("經營")], fa[fa.index("由") + 1:fa.rindex("經營")]
+        assert f"經營{al}工作室" in fa and f"，{am}工作室" in fa and restore(fa, ma) == ta, fa
+    # 改姓時，這個姓的既有全名當下就換好：這份模型只抓到王小明，王大寶也不會留下真名
+    for sd in range(5):
+        o1 = Obfuscator(seed=sd)
+        t1 = "王小明與王大寶到庭。"
+        _, mp1 = o1.apply(t1, [sp1(t1, "王小明"), sp1(t1, "王大寶")])
+        t2 = f"王小明與王大寶再次到庭，{o1.sur['王']}小姐是第三人。"
+        f2, _ = Obfuscator(seed=sd, mapping=mp1).apply(t2, [sp1(t2, "王小明")])
+        assert "王大寶" not in f2 and "王小明" not in f2, f2
+    # 一般模式：前一份為了避撞多挪的天數，同一天的別種寫法照樣多挪（同一個物件、或新物件沿用對照表都一樣）
+    for sd in range(10):
+        og = Obfuscator(seed=sd, mode="general")
+        d = dt.date(2024, 1, 1) + dt.timedelta(days=og.shift)
+        clash = f"{d.year - 1911}年{d.month}月{d.day}日"
+        t1 = f"原文本來就有{clash}。原告113年1月1日到職。"
+        f1, mp1 = og.apply(t1, [sp1(t1, "113年1月1日", "DATE_EVENT", "date")])
+        got = _parse_date(f1[f1.index("原告") + 2:f1.index("到職")])
+        for ob2 in (og, Obfuscator(seed=sd + 7, mode="general", mapping=mp1)):
+            f2, _ = ob2.apply("原告於113/01/01到職。", [sp1("原告於113/01/01到職。", "113/01/01", "DATE_EVENT", "date")])
+            assert _parse_date(f2[3:f2.index("到職")]) == got, (f1, f2)
+    # 一般模式、沒寫年份的跨年日期：重新載入對照表後位移一致（12月20日 +35 天 → 1月24日；113年12月20日 → 114年1月24日）
+    for sd in range(10):
+        oy = Obfuscator(seed=sd, mode="general")
+        fy, my = oy.apply("12月20日出遊。", [sp1("12月20日出遊。", "12月20日", "DATE_EVENT", "date")])
+        t2 = "113年12月20日出遊。"
+        f2, _ = Obfuscator(seed=sd + 1, mode="general", mapping=my).apply(t2, [sp1(t2, "113年12月20日", "DATE_EVENT", "date")])
+        want = dt.date(2024, 12, 20) + dt.timedelta(days=oy.shift)
+        assert f2.startswith(f"{want.year - 1911}年{want.month}月{want.day}日"), (fy, f2, oy.shift)
+    # 位移大約半年、又為了避撞多挪：重新載入時照記下的實際位移，不會反推成往回挪（6月1日 +183 → 12月1日；113年6月1日 → 113年12月1日）
+    for sd in range(20, 40):
+        t1 = "6月1日到職，另有11月30日紀錄。"
+        _, m1 = Obfuscator(seed=sd, mode="general").apply(t1, [sp1(t1, "6月1日", "DATE_EVENT", "date"), sp1(t1, "11月30日", "DATE_EVENT", "date")])
+        days = next(e["shift"] for e in m1 if e["original"] == "6月1日")
+        t2 = "113年6月1日到職。"
+        f2, _ = Obfuscator(seed=sd + 1, mode="general", mapping=m1).apply(t2, [sp1(t2, "113年6月1日", "DATE_EVENT", "date")])
+        want = dt.date(2024, 6, 1) + dt.timedelta(days=days)
+        assert f2.startswith(f"{want.year - 1911}年{want.month}月{want.day}日"), (sd, f2, days)
+    # 號碼：市話區碼後第一碼 2～9；新舊式居留證檢查碼正確、第二碼不變；統一編號、信用卡號的檢查碼正確
+    from .fakes import _ID_LETTER, _id_check
+    valid = lambda x: _id_check(x[0], [(_ID_LETTER.index(x[1]) + 10) % 10 if x[1].isalpha() else int(x[1])] + [int(c) for c in x[2:9]]) == int(x[9])
+    arc_new, arc_old = fake_id(random.Random(1), "A", "8"), fake_id(random.Random(2), "F", "C")
+    for sd in range(40):
+        on = Obfuscator(seed=sd)
+        assert re.fullmatch(r"\(02\)[2-9]\d{3}-\d{4}", on._pii("(02)2345-6789", "NUMBER", "")), sd
+        for arc in (arc_new, arc_old):
+            v = on._pii(arc, "CODE", "")
+            assert v[:2] == arc[:2] and v != arc and valid(v), (arc, v)
+        assert ubn_ok(on._pii("04595257", "NUMBER", ""))
+        fw = on._pii("０４５９５２５７", "NUMBER", "")
+        assert all(c in _FW for c in fw) and ubn_ok(fw.translate(_FW2HW)), fw  # 全形的照樣全形
+        assert luhn_ok(re.sub(r"\D", "", on._pii("4111-1111-1111-1111", "NUMBER", "")))
     print("混淆自檢 OK：往返一致、王先生→" + sur + "先生、日期間隔不變、法律模式保留個人日期")
 
 

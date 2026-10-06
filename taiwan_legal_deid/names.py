@@ -26,8 +26,9 @@ def _rare():
     """罕見姓：姓氏表裡不在 SURNAME_ORDER 的單字姓；權重＝人數^0.3（前段不獨占，只有幾十人的姓也抽得到）。"""
     from .surnames import SURNAMES
     pop = {}
-    for r in csv.DictReader(open(f"{_D}/open/moi_surnames_112.csv", encoding="utf-8-sig")):
-        pop[r["lastname"]] = pop.get(r["lastname"], 0) + int(r["人口數"])
+    with open(f"{_D}/open/moi_surnames_112.csv", encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            pop[r["lastname"]] = pop.get(r["lastname"], 0) + int(r["人口數"])
     xs = sorted(s for s in SURNAMES if s not in _SUR)
     return xs, [max(pop.get(s, 1), 1) ** 0.3 for s in xs]
 
@@ -35,7 +36,8 @@ def _rare():
 @functools.lru_cache(None)
 def _word_given():
     """像一般詞的名字：data/open/word_names.txt（python -m taiwan_legal_deid.names build 重建）。"""
-    return [w.strip() for w in open(f"{_D}/open/word_names.txt", encoding="utf-8") if w.strip()]
+    with open(f"{_D}/open/word_names.txt", encoding="utf-8") as f:
+        return [w.strip() for w in f if w.strip()]
 
 
 def sample_name(rng: random.Random, length: int | None = None, compound: bool | None = None, avoid: set[str] | None = None,

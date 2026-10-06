@@ -309,9 +309,9 @@ def main():
 
 
 if __name__ == "__main__":
-    t, s = render("{role}即{title}{p}{tail}", {"role": "被告", "title": "法官", "p": "林雅婷", "tail": "否認。"}, random.Random(0))
-    assert t == "被告即法官林雅婷否認。" and t[s[0]["start"]:s[0]["end"]] == "林雅婷" and s[0]["label"] == "MASK"
-    t2, s2 = render("{p}之出生日期為{birth}，與承諾書簽署日期{event}相距甚遠。", {"p": "林雅婷", "birth": "70年5月3日", "event": "93年6月25日"}, random.Random(0))
+    t, s = render("{role}即{title}{p}{tail}", {"role": "被告", "title": "法官", "p": "溫昀蓁", "tail": "否認。"}, random.Random(0))
+    assert t == "被告即法官溫昀蓁否認。" and t[s[0]["start"]:s[0]["end"]] == "溫昀蓁" and s[0]["label"] == "MASK"
+    t2, s2 = render("{p}之出生日期為{birth}，與承諾書簽署日期{event}相距甚遠。", {"p": "溫昀蓁", "birth": "70年5月3日", "event": "93年6月25日"}, random.Random(0))
     assert [(t2[x["start"]:x["end"]], x["label"], x.get("group", "person")) for x in s2] == [
-        ("林雅婷", "MASK", "person"), ("70年5月3日", "MASK", "pii"), ("93年6月25日", "KEEP", "pii")], s2
+        ("溫昀蓁", "MASK", "person"), ("70年5月3日", "MASK", "pii"), ("93年6月25日", "KEEP", "pii")], s2
     main()

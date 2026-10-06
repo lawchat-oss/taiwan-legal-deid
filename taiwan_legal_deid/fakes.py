@@ -6,13 +6,39 @@ import csv, functools, os, random, re
 _ID_LETTER = "ABCDEFGHJKLMNPQRSTUVXYWZIO"  # 身分證首字母對應 10～35
 
 
-def fake_id(rng: random.Random, letter: str | None = None) -> str:
-    """檢查碼正確的身分證字號。"""
-    L = letter or rng.choice("ABCDEFGHJKLMNPQRSTUVXYWZ")
-    body = [rng.choice("12")] + [str(rng.randrange(10)) for _ in range(7)]
+def _id_check(L: str, body: list[int]) -> int:
+    """身分證、居留證的檢查碼：首字母換成兩位數，加上第 2～9 碼，加權 1,9,8,7,6,5,4,3,2,1。"""
     n = _ID_LETTER.index(L) + 10
-    s = n // 10 + (n % 10) * 9 + sum(int(d) * w for d, w in zip(body, range(8, 0, -1)))
-    return L + "".join(body) + str((10 - s % 10) % 10)
+    s = n // 10 + (n % 10) * 9 + sum(d * w for d, w in zip(body, range(8, 0, -1)))
+    return (10 - s % 10) % 10
+
+
+def fake_id(rng: random.Random, letter: str | None = None, second: str | None = None) -> str:
+    """檢查碼正確的身分證字號。second：第二碼（身分證 1、2；新式居留證 8、9；舊式居留證 A～D 字母）。"""
+    L = letter or rng.choice("ABCDEFGHJKLMNPQRSTUVXYWZ")
+    sec = second or rng.choice("12")
+    s2 = (_ID_LETTER.index(sec) + 10) % 10 if sec.isalpha() else int(sec)  # 舊式居留證：第二碼字母換成數字取個位數
+    body = [rng.randrange(10) for _ in range(7)]
+    return L + sec + "".join(map(str, body)) + str(_id_check(L, [s2] + body))
+
+
+def ubn_ok(d: str) -> bool:
+    """統一編號（8 碼）檢查碼：加權 1,2,1,2,1,2,4,1，乘積的各位數相加能被 5 整除；第 7 碼是 7 時加 1 也算。"""
+    if not re.fullmatch(r"\d{8}", d):
+        return False
+    s = sum(sum(map(int, str(int(c) * w))) for c, w in zip(d, (1, 2, 1, 2, 1, 2, 4, 1)))
+    return s % 5 == 0 or (d[6] == "7" and (s + 1) % 5 == 0)
+
+
+def luhn_ok(d: str) -> bool:
+    """信用卡號（Luhn）檢查碼。"""
+    if not re.fullmatch(r"\d{13,19}", d):
+        return False
+    tot = 0
+    for i, c in enumerate(reversed(d)):
+        v = int(c) * (2 if i % 2 else 1)
+        tot += v - 9 if v > 9 else v
+    return tot % 10 == 0
 
 
 def fake_digits(rng: random.Random, pattern: str, keep_first: int = 0) -> str:
@@ -34,7 +60,8 @@ def fake_birth(rng: random.Random, roc: bool = True) -> str:
 @functools.lru_cache(None)
 def _roads():
     p = os.path.join(os.path.dirname(__file__), "data", "roads_a.csv")
-    rows = [(r["city"], r["site_id"][len(r["city"]):], r["road"]) for r in csv.DictReader(open(p, encoding="utf-8-sig"))]
+    with open(p, encoding="utf-8-sig") as f:
+        rows = [(r["city"], r["site_id"][len(r["city"]):], r["road"]) for r in csv.DictReader(f)]
     return [r for r in rows if re.search("(路|街|大道)$", r[2])]
 
 

@@ -14,7 +14,7 @@ It is designed with reference to the de-identification technique classification 
 
 - **Tells what to replace from what to keep**: the program lists every possible name, personal-data value and organization; a model then decides for each one whether to *replace*, *keep*, or *ignore* it. Judges, prosecutors, lawyers and clerks acting in their official roles are kept; parties, witnesses and other private persons are replaced. Government agencies are kept; private companies are replaced.
 - **Realistic fakes**: the same person gets the same fake name across the whole document, with surname and given name mapped separately (陳小姐 → 郭小姐). Addresses become real road names in the same city, national IDs get a valid checksum, birthdays keep the year (so ages stay the same), and listed-company short names and "下稱" aliases follow the full name.
-- **Codes**: people become 甲, 乙 and so on (the same person gets the same code across the document; references by surname, given name or nickname get that code when they match exactly one full name, and become 〇 when several people share the surname, so no one is mixed up). Companies become A公司 and their "下稱" aliases follow. Numbers, emails and URLs become numbered tokens such as 〔電話1〕. Codes avoid characters the text already uses (if the text has 甲方, 甲 is not used as a code). Birthdays keep only the year and addresses only the city or county.
+- **Codes**: people become 甲, 乙 and so on (the same person gets the same code across the document; references by surname, given name or nickname get that code when they match exactly one full name, and become 〇 when several people share the surname, so no one is mixed up). Companies keep everything but the brand, which becomes a letter (澄嶼顧問股份有限公司 → A顧問股份有限公司), and their "下稱" aliases follow (澄嶼公司 → A公司). Numbers, emails and URLs become numbered tokens such as 〔電話1〕. Codes avoid characters the text already uses (if the text has 甲方, 甲 is not used as a code). Birthdays keep only the year and addresses only the city or county.
 - **Anonymization**: uses codes and keeps no mapping table; dates of personal events are also reduced to year and month (court and filing dates are kept; adjustable in Python).
 - **Legal mode (default)**: when pseudonymizing, dates of personal events are left unchanged, so an AI can still reason about periods and deadlines. Land lot numbers keep the section name and are replaced consistently across the case.
 - **Runs locally on CPU**: no GPU needed, and no network access except for downloading the model the first time. The mapping table is a JSON file on your computer.
@@ -25,21 +25,21 @@ It is designed with reference to the de-identification technique classification 
 
 Input (fictional):
 
-> 原告陳美玲（身分證 F223456781，民國71年3月8日生，住臺中市西屯區文心路三段1999號7樓，手機 0912-345-678）與被告岱昀顧問股份有限公司（下稱岱昀公司）間確認僱傭關係存在事件。原告自113年5月2日起任職於岱昀公司，陳小姐主張岱昀公司違法解僱。被告訴訟代理人王大同律師。法官宋芷蘅。
+> 原告陳美玲（身分證 F223456781，民國71年3月8日生，住臺中市西屯區文心路三段1999號7樓，手機 0912-345-678）與被告澄嶼顧問股份有限公司（下稱澄嶼公司）間確認僱傭關係存在事件。原告自113年5月2日起任職於澄嶼公司，陳小姐主張澄嶼公司違法解僱。被告訴訟代理人王大同律師。法官宋芷蘅。
 
 Realistic pseudonymization (fake names differ on every run):
 
-> 原告郭淑瑩（身分證 F200575662，民國71年9月6日生，住臺中市沙鹿區北勢七街二段242號7樓，手機 0925-228-858）與被告榮翔顧問股份有限公司（下稱榮翔公司）間確認僱傭關係存在事件。原告自113年5月2日起任職於榮翔公司，郭小姐主張榮翔公司違法解僱。被告訴訟代理人王大同律師。法官宋芷蘅。
+> 原告姚靜慧（身分證 F279190746，民國71年9月8日生，住臺中市太平區太平十一街四段554號7樓，手機 0976-232-860）與被告岑智顧問股份有限公司（下稱岑智公司）間確認僱傭關係存在事件。原告自113年5月2日起任職於岑智公司，姚小姐主張岑智公司違法解僱。被告訴訟代理人王大同律師。法官宋芷蘅。
 
 Code pseudonymization:
 
-> 原告甲（身分證 〔身分證1〕，民國71年生，住臺中市〔地址1〕，手機 〔電話1〕）與被告A公司（下稱A公司）間確認僱傭關係存在事件。原告自113年5月2日起任職於A公司，甲小姐主張A公司違法解僱。被告訴訟代理人王大同律師。法官宋芷蘅。
+> 原告甲（身分證 〔身分證1〕，民國71年生，住臺中市〔地址1〕，手機 〔電話1〕）與被告A顧問股份有限公司（下稱A公司）間確認僱傭關係存在事件。原告自113年5月2日起任職於A公司，甲小姐主張A公司違法解僱。被告訴訟代理人王大同律師。法官宋芷蘅。
 
 Anonymization (the only differences from the code version: personal-event dates keep just year and month, and there is no mapping table):
 
-> 原告甲（身分證 〔身分證1〕，民國71年生，住臺中市〔地址1〕，手機 〔電話1〕）與被告A公司（下稱A公司）間確認僱傭關係存在事件。原告自113年5月起任職於A公司，甲小姐主張A公司違法解僱。被告訴訟代理人王大同律師。法官宋芷蘅。
+> 原告甲（身分證 〔身分證1〕，民國71年生，住臺中市〔地址1〕，手機 〔電話1〕）與被告A顧問股份有限公司（下稱A公司）間確認僱傭關係存在事件。原告自113年5月起任職於A公司，甲小姐主張A公司違法解僱。被告訴訟代理人王大同律師。法官宋芷蘅。
 
-All examples are fictional. The IDs, phone numbers and addresses produced by the realistic version are random and may happen to match real ones.
+All examples are fictional. The names, company names, IDs, phone numbers and addresses produced by the realistic version are random and may happen to match real people, companies, numbers or addresses.
 
 ## Install
 
@@ -103,7 +103,7 @@ Run `taiwan-legal-deid --download` (add `--model 3l` for the 3-layer model) on a
 
 ## Accuracy and speed
 
-Measured with weights-v1 (package 0.2.0). Reproduce with `python eval/reproduce.py` (also needs `pip install pyarrow`). All three outputs share one detection step, so a value the detector misses is missed by all three.
+Measured with weights-v1 (package 0.2.1). Reproduce with `python eval/reproduce.py` (also needs `pip install pyarrow`). All three outputs share one detection step, so a value the detector misses is missed by all three.
 
 | Pseudonymization | 6-layer (default) | 3-layer |
 |---|---|---|
@@ -134,22 +134,25 @@ Measured with weights-v1 (package 0.2.0). Reproduce with `python eval/reproduce.
 - Code pseudonymization uses the same replacement as anonymization: direct identifiers, birthdays, addresses and names in official roles score the same as in the table above; the difference is that personal-event dates are kept (98.3% on the synthetic legal documents, same for both models).
 - In legal mode, birthdays are fully replaced 95.1% of the time and personal-event dates are kept 98.3% of the time (same for both models).
 
-## Known limitations
+## Scope and known limitations
 
-- It will miss things (see the tables above); always check by hand before sharing.
-- Japanese names written only in katakana, and people referred to only by given name or nickname in chats, are often missed.
+**Scope**: Traditional Chinese documents from Taiwan. Japanese text (names written only in katakana, 株式会社, Japanese addresses, Japanese era dates) is out of scope.
+
+**Detection will miss things and make mistakes** (limits of the model, see the tables above); always check by hand before sharing:
+
+- People referred to only by given name or nickname in chats are often missed.
 - Address boundaries are hard to get exactly right (addresses fully replaced in the synthetic set: 88% for 6-layer, 84% for 3-layer).
 - Names of lawyers or judges that appear on their own, without a title, in page headers or lists are sometimes treated as names to replace.
 - Very long URLs (over about 220 characters) are sometimes missed entirely.
-- With a shared case mapping (`--map`), if a fake name from an earlier document happens to be a real name in a later one, that person's fake name or form of address may be inconsistent in later documents; restore each document with its own mapping file.
-- When a listed company's short name appears before its full name and there is no "下稱" alias, the short name and the full name may get different fake names.
-- When a person's name and a company name share the same characters (陳佳穎 and 佳穎科技有限公司), the company's "下稱" alias may get the person's fake name and no longer match the company's fake name.
-- Some chain stores and state-owned companies are kept when they are parties. Japanese companies (株式会社), Japanese addresses and Japanese era dates are not handled.
-- Anonymization only handles the direct and indirect identifiers listed above; ages, occupations, schools, family relationships and details of events are not handled.
-- When restoring the code version, a lone code is not restored where it forms an ordinary word (甲方, 甲說, 甲級); values reduced to a year, a month or a city are not restored, and neither is a lone company letter (A), although A公司 is; a token such as 〔電話1〕 rewritten in some other form is not restored either.
-- When `Anonymizer.anonymize()` is called document by document and a later document already uses a code assigned earlier, that person gets a new code in that document and a warning is issued; process a batch with `anonymize_many()` or the command line instead.
-- Codes are consistent only within one `Anonymizer` or one command; across separate batches, 甲 in one batch is not the same person as 甲 in another.
+- Firms (law, accounting and land-administration offices), some chain stores and state-owned companies are often kept even when they are a party or a party's employer.
+
+**Design trade-offs** (working as designed; good to know before use):
+
+- Anonymization only handles the direct and indirect identifiers listed above; ages, occupations, schools, family relationships, details of events, and the type, industry and city words kept in company names (顧問 in A顧問股份有限公司) are not handled.
+- When restoring the code version, a lone code is not restored where it forms an ordinary word (甲方, 甲說, 甲級); a lone company letter is restored only after a party reference such as 被告A or （下稱A）; for A公司, and for a party reference followed by a company type or industry word (被告A科技, 被告A集團), only the letter goes back to the brand and the rest stays when the brand can be separated from the name (澄嶼公司, 澄嶼科技); a letter that forms an ordinary word with the next character is left alone (A棟, A咖, X光), and so are 維生素A and A/B測試; values reduced to a year, a month or a city are not restored (the details are gone); a token such as 〔電話1〕 rewritten in some other form is not restored either.
 - When several people share a surname, a reference by surname alone (陳小姐) cannot be tied to one person and becomes 〇小姐.
+- Codes are consistent only within one `Anonymizer` or one command; across separate batches, 甲 in one batch is not the same person as 甲 in another. When `Anonymizer.anonymize()` is called document by document and a later document already uses a code assigned earlier, that person gets a new code in that document and a warning is issued; process a batch with `anonymize_many()` or the command line instead.
+- With a shared case mapping (`--map`), if a fake name from an earlier document happens to be a real name in a later one, that entry is disabled and later documents use a new fake name; restore AI replies about each document with that document's own mapping file.
 
 ## How it works
 

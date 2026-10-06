@@ -22,8 +22,12 @@ def test_download(tmp_path, monkeypatch):
     monkeypatch.setattr(weights, "MODELS", {"ok": ("a.onnx", hashlib.sha256(b"onnx").hexdigest()), "bad": ("a.onnx", "0" * 64)})
     monkeypatch.setenv("TAIWAN_LEGAL_DEID_HOME", str(tmp_path / "home"))
     monkeypatch.delenv("TAIWAN_LEGAL_DEID_OFFLINE", raising=False)
-    with pytest.raises(RuntimeError):  # sha256 不符：報錯、不留檔
+    with pytest.raises(weights.DownloadError):  # sha256 不符：重試後報錯、不留檔
         weights.path("bad")
+    assert os.listdir(tmp_path / "home" / "weights-v1") == []
+    monkeypatch.setattr(weights, "MODELS", dict(weights.MODELS, gone=("missing.onnx", "0" * 64)))
+    with pytest.raises(weights.DownloadError, match="模型下載失敗"):  # 下載不到（網路斷、檔案不在）：一行訊息、不留半個檔案
+        weights.path("gone")
     assert os.listdir(tmp_path / "home" / "weights-v1") == []
     assert open(weights.path("ok"), "rb").read() == b"onnx"
     monkeypatch.setenv("TAIWAN_LEGAL_DEID_OFFLINE", "1")
@@ -35,14 +39,14 @@ def test_download(tmp_path, monkeypatch):
 @pytest.mark.skipif(not os.path.exists(os.path.join(weights.home(), "weights-v1", "model-6l.onnx")), reason="還沒下載模型")
 def test_detect():
     from taiwan_legal_deid import Anonymizer, Detector, Obfuscator, restore
-    text = "原告林郁婷（手機 0912-345-678）與被告岱昀顧問股份有限公司間給付工資事件，法官王大同。"
+    text = "原告林郁婷（手機 0912-345-678）與被告澄嶼顧問股份有限公司間給付工資事件，法官王大同。"
     det = Detector()
     fake, mapping = Obfuscator(det, seed=0).pseudonymize(text)
-    assert "林郁婷" not in fake and "0912-345-678" not in fake and "岱昀" not in fake and "法官王大同" in fake, fake
+    assert "林郁婷" not in fake and "0912-345-678" not in fake and "澄嶼" not in fake and "法官王大同" in fake, fake
     assert restore(fake, mapping) == text
     fake, mapping = Obfuscator(det, style="code").pseudonymize(text)
-    assert fake == "原告甲（手機 〔電話1〕）與被告A公司間給付工資事件，法官王大同。", fake
-    assert restore("甲可向A公司請求，〔電話1〕。", mapping) == "林郁婷可向岱昀顧問股份有限公司請求，0912-345-678。"
+    assert fake == "原告甲（手機 〔電話1〕）與被告A顧問股份有限公司間給付工資事件，法官王大同。", fake
+    assert restore("甲可向A公司請求，〔電話1〕。", mapping) == "林郁婷可向澄嶼公司請求，0912-345-678。"
     assert Anonymizer(det).anonymize(text) == fake
 
 

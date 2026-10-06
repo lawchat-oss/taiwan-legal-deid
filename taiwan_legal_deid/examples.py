@@ -47,10 +47,11 @@ def common_words(min_freq=30) -> set[str]:
     p = os.path.join(os.path.dirname(__file__), "data", "jieba_dict_big.txt")
     out = set()
     if os.path.exists(p):
-        for line in open(p, encoding="utf-8"):
-            w, f, pos = (line.split() + ["", "", ""])[:3]
-            if 2 <= len(w) <= 3 and all(CJK.match(c) for c in w) and surname_len(w) and not pos.startswith("nr") and int(f or 0) >= min_freq:
-                out.add(w)
+        with open(p, encoding="utf-8") as fh:
+            for line in fh:
+                w, f, pos = (line.split() + ["", "", ""])[:3]
+                if 2 <= len(w) <= 3 and all(CJK.match(c) for c in w) and surname_len(w) and not pos.startswith("nr") and int(f or 0) >= min_freq:
+                    out.add(w)
     return out
 
 
