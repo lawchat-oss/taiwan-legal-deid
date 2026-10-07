@@ -166,6 +166,16 @@ Measured with weights-v2 (package 0.3.0). Reproduce with `python eval/reproduce.
 
 Training data: public court judgments (the names of parties, representatives, judges, clerks and others listed in each judgment are first replaced consistently with fake names), synthetic legal documents, and programmatic augmentation. The training code is in `taiwan_legal_deid/train.py` (MLX, Apple Silicon) and must be run from the repository, since it reads and writes the repository's `data/` folder; the training data is not published.
 
+## Enterprise deployment & customization
+
+The open-source version is general-purpose, with all features and models fully open. If your organization needs help with any of the following, email support@lawchat.com.tw (subject: 「去識別化導入」 / "De-identification deployment"):
+
+| Need | What it covers |
+|---|---|
+| Deployment | Install it on your own machines and connect it to your existing workflow (for example, de-identify automatically before text goes to an external AI, and restore the reply afterwards) |
+| Evaluation | Measure actual performance on your own sample documents, on your own machines |
+| Customization | Tune the model for your document types, or add categories to handle |
+
 ## About
 
 Maintained by [LawChat](https://lawchat.com.tw) — a Taiwan legal AI platform.
@@ -182,6 +192,8 @@ Best-effort maintenance, no SLA on issues. Reports of missed or wrongly replaced
 - Model weights: Apache-2.0 (`LICENSES/Apache-2.0.txt`), fine-tuned from bert-base-chinese (Google, Apache-2.0).
 - Bundled third-party data (jieba dictionary; open government data from the Ministry of the Interior and the Securities and Futures Bureau): see `NOTICE`.
 - The synthetic legal test set is MIT-licensed, like the code.
+
+Custom models are not in this repository and are offered under a separate commercial license; the licenses of this repository's code (MIT) and model weights (Apache-2.0) are unchanged.
 
 ## Disclaimer
 
