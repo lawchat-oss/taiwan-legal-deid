@@ -8,7 +8,7 @@ It is designed with reference to the de-identification technique classification 
 
 | Output | Looks like | Mapping table | Reversible | Use it when |
 |---|---|---|---|---|
-| Realistic pseudonymization (default) | 陳美玲 → 郭淑瑩 | kept | yes | you send the text to an AI and turn the answer back into the original |
+| Realistic pseudonymization (default) | 陳美玲 → 姚靜慧 | kept | yes | you send the text to an AI and turn the answer back into the original |
 | Code pseudonymization (`--codes`) | 陳美玲 → 甲, phone → 〔電話1〕 | kept | yes (birthdays reduced to the year stay that way) | readers should see at a glance what was replaced, and you still want to restore it |
 | Anonymization (`--anonymize`) | 陳美玲 → 甲, phone → 〔電話1〕, 113年5月2日 → 113年5月 | none | no | you share with third parties or publish, after checking by hand |
 
