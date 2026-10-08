@@ -142,7 +142,7 @@ Measured with weights-v2 (package 0.3.0); reproduce with `python eval/reproduce.
 | Names in official roles kept (synthetic legal documents) | 98.0% | 98.0% |
 | Speed: detection and replacement for a document of about 100,000 characters (Apple M5 Max CPU) | about 12 s | about 8 s |
 
-¹ The mid-length and long items in tw-PII-bench annotate only a randomly sampled subset of PII categories (see the [dataset card](https://huggingface.co/datasets/lianghsun/tw-PII-bench)); replacing unannotated personal data counts as a false positive, so precision is lower. See the analysis below.
+¹ Each mid-length or long item in tw-PII-bench is generated and annotated for 4–7 randomly selected categories, so personal data of other categories in the text may be unannotated (see the [dataset card](https://huggingface.co/datasets/lianghsun/tw-PII-bench)). Replacing unannotated personal data counts as a false positive, so precision is lower; some are genuine false positives of this tool. See the analysis below.
 
 ### By category (6-layer)
 
@@ -223,8 +223,8 @@ Precision, by output type:
 - **Names on tw-PII-bench**: the person-name category was fully inspected before the split and is not reported.
 - **Organizations**: neither test set annotates organizations; not reported.
 - **Category mismatch**: precision is grouped by output type; alphanumeric codes and digit numbers each cover several kinds of ID, so the two tables do not align exactly.
-- **Emails and personal-event dates on tw-PII-bench**: the mid-length and long items annotate only a randomly sampled subset of PII categories, so emails in email threads are often unannotated. Analysis of the 6-layer model on the development half (the other half, which may be inspected):
-  - Emails: of 170 predictions matching no annotation, 149 were addresses not annotated anywhere in the document and 21 were repeats of an address annotated elsewhere; of 40 sampled, 39 were personal addresses of senders and recipients and 1 was an agency's official mailbox (a false positive).
+- **Emails and personal-event dates on tw-PII-bench**: each mid-length or long item is generated and annotated for 4–7 randomly selected categories, so personal data of other categories may be unannotated; emails in email threads often fall into this group. Analysis of the 6-layer model on the development half (the other half, which may be inspected):
+  - Emails: of 170 predictions matching no annotation, 149 were email addresses not annotated anywhere in the document and 21 were repeats of an email address annotated elsewhere; of 40 sampled, 39 were personal addresses of senders and recipients and 1 was an agency's official mailbox (a false positive).
   - Personal-event dates: of 40 sampled, about 60% were unannotated personal dates such as hospital visits, accidents and lease terms, and about 40% were letter dates, deadlines and policy effective dates (false positives). Personal-event dates are replaced only in general mode (`--general`); the default legal mode leaves them unchanged.
 - **6-layer vs. 3-layer**: the 3-layer model is slightly higher on a few categories such as national IDs and birthdays; the 6-layer model is more stable on names and addresses and has higher precision, so it is the default.
 
