@@ -13,11 +13,22 @@ It is designed with reference to the de-identification technique classification 
 | Anonymization (`--anonymize`) | 陳美玲 → 甲, phone → 〔電話1〕, 113年5月2日 → 113年5月 | none | no | you share with third parties or publish, after checking by hand |
 
 - **Tells what to replace from what to keep**: the program lists every possible name, personal-data value and organization; a model then decides for each one whether to *replace*, *keep*, or *ignore* it. Judges, prosecutors, lawyers and clerks acting in their official roles are kept; parties, witnesses and other private persons are replaced. Government agencies are kept; private companies are replaced.
-- **Realistic fakes**: the same person gets the same fake name across the whole document, with surname and given name mapped separately (陳小姐 → 郭小姐). Addresses become real road names in the same city, national IDs get a valid checksum, birthdays keep the year (so ages stay the same), and listed-company short names and "下稱" aliases follow the full name.
-- **Codes**: people become 甲, 乙 and so on (the same person gets the same code across the document; references by surname, given name or nickname get that code when they match exactly one full name, and become 〇 when several people share the surname, so no one is mixed up). Companies keep everything but the brand, which becomes a letter (澄嶼顧問股份有限公司 → A顧問股份有限公司), and their "下稱" aliases follow (澄嶼公司 → A公司). Numbers, emails and URLs become numbered tokens such as 〔電話1〕. Codes avoid characters the text already uses (if the text has 甲方, 甲 is not used as a code). Birthdays keep only the year and addresses only the city or county.
-- **Anonymization**: uses codes and keeps no mapping table; dates of personal events are also reduced to year and month (court and filing dates are kept; adjustable in Python).
 - **Legal mode (default)**: when pseudonymizing, dates of personal events are left unchanged, so an AI can still reason about periods and deadlines. Land lot numbers keep the section name and are replaced consistently across the case.
 - **Runs locally on CPU**: no GPU needed, and no network access except for downloading the model the first time. The mapping table is a JSON file on your computer.
+
+How each kind of value is replaced:
+
+| Value | Realistic pseudonymization (default) | Code pseudonymization | Anonymization |
+|---|---|---|---|
+| Names | The same person gets the same fake name across the document, with surname and given name mapped separately (陳小姐 → 郭小姐) | 甲, 乙 and so on; the same person gets the same code across the document, and references by surname, given name or nickname get that code when they match exactly one full name; when several people share the surname they become 〇, so no one is mixed up | Same as code pseudonymization |
+| Private companies | A realistic fake company name; listed-company short names and "下稱" aliases follow | Only the brand becomes a letter (澄嶼顧問股份有限公司 → A顧問股份有限公司), and "下稱" aliases follow (澄嶼公司 → A公司) | Same as code pseudonymization |
+| National IDs | A fake number with a valid checksum | 〔身分證1〕 | Same as code pseudonymization |
+| Phone numbers, emails, URLs and similar | Randomly generated fakes | Numbered tokens such as 〔電話1〕 | Same as code pseudonymization |
+| Addresses | Real road names in the same city | City or county only | City or county only |
+| Birthdays | Year kept (so ages stay the same) | Year only | Year only |
+| Personal-event dates | Unchanged in legal mode; shifted across the document in general mode | Unchanged in legal mode; year and month only in general mode | Year and month only (court and filing dates are kept; adjustable in Python) |
+
+Codes avoid characters the text already uses (if the text has 甲方, 甲 is not used as a code). Anonymization uses codes and keeps no mapping table.
 
 > Pseudonymization keeps a mapping table, and anyone with it can restore the original text: keep the table as carefully as the personal data itself, and store it separately from the pseudonymized text. Anonymization keeps no table and cannot be reversed, but it does not guarantee anonymity in the legal sense: the story told in the text can still reveal who someone is, and whether the output is anonymous in the legal sense depends on the context and is for you to judge. The tool will miss things; always check by hand before sharing. Anonymized output consists of codes, so a missed real name stands out: check it all the more carefully before it leaves your hands.
 
@@ -91,7 +102,13 @@ for text in texts:
     fake, mapping = Obfuscator(det, mapping=mapping).pseudonymize(text)  # restore AI replies about this document with this mapping
 ```
 
-To anonymize a batch: `Anonymizer(det).anonymize_many(texts)` (it scans all the texts first and avoids codes they already use; documents processed by the same `Anonymizer` share codes). `Anonymizer` options: `event_dates` (personal events: `month` by default, `year`, `keep`), `other_dates` (court and other dates: `keep` by default, `month`, `year`), `addr` (addresses: `city` by default, `district` keeps the district too).
+To anonymize a batch: `Anonymizer(det).anonymize_many(texts)` (it scans all the texts first and avoids codes they already use; documents processed by the same `Anonymizer` share codes). `Anonymizer` options:
+
+| Option | Applies to | Values (the first is the default) |
+|---|---|---|
+| `event_dates` | Personal-event dates | `month` year and month, `year` year only, `keep` unchanged |
+| `other_dates` | Court and other dates | `keep` unchanged, `month` year and month, `year` year only |
+| `addr` | Addresses | `city` city or county, `district` down to the district |
 
 `Obfuscator.anonymize()` from 0.1.x still works and returns the same result as before (it pseudonymizes and returns a mapping table), with a FutureWarning asking you to switch to `pseudonymize()`; it will be removed in 1.0. For irreversible anonymization use `Anonymizer`.
 
@@ -105,38 +122,136 @@ Run `taiwan-legal-deid --download` (add `--model 3l` for the 3-layer model) on a
 
 Measured with weights-v2 (package 0.3.0). Reproduce with `python eval/reproduce.py` (also needs `pip install pyarrow`). All three outputs share one detection step, so a value the detector misses is missed by all three.
 
-| Pseudonymization | 6-layer (default) | 3-layer |
-|---|---|---|
-| Synthetic legal documents: names to replace, fully replaced | 92.6% | 91.6% |
-| Synthetic legal documents: names in official roles kept | 98.0% | 98.0% |
-| Synthetic legal documents: other personal data except phone numbers, fully replaced (general mode) | 93.2% | 94.1% |
-| tw-PII-bench test half: personal data other than names and phone numbers, fully replaced | 96.3% | 95.6% |
-| Synthetic legal documents: phone numbers, fully replaced (errors inspected during development; for reference only) | 95.9% | 95.9% |
-| tw-PII-bench test half: phone numbers, fully replaced (errors inspected during development; for reference only) | 96.1% | 94.6% |
-| Speed: find and replace in one document of about 100,000 characters (Apple M5 Max CPU) | about 12 s | about 8 s |
-
-| Anonymization (`Anonymizer` defaults) | 6-layer (default) | 3-layer |
-|---|---|---|
-| Synthetic legal documents: direct identifiers other than phone numbers, fully masked | 94.3% | 93.6% |
-| Synthetic legal documents: birthdays reduced to the year | 92.7% | 95.1% |
-| Synthetic legal documents: addresses reduced to the city or county | 86.7% | 85.6% |
-| Synthetic legal documents: personal-event dates reduced to year and month | 93.2% | 94.1% |
-| Synthetic legal documents: names in official roles kept | 96.1% | 96.1% |
-| tw-PII-bench test half: direct identifiers other than names and phone numbers, fully masked | 97.4% | 97.0% |
-| tw-PII-bench test half: addresses reduced to the city or county | 94.7% | 89.8% |
-| tw-PII-bench test half: dates generalized | 90.3% | 91.6% |
+| Term | Meaning |
+|---|---|
+| Recall | Of the values that should be replaced, the share replaced in full (partial replacement counts as a miss) |
+| Precision | Of the values replaced, the share that really are personal data (the rest were replaced unnecessarily) |
 
 **All numbers on this page come from synthetic test sets. Synthetic data is usually simpler than real documents, so real-world results may be lower. Always check by hand before sharing.**
 
-- **Phone-number results are for reference only**: while developing 0.3.0, the phone-number errors in both the synthetic legal set and tw-PII-bench were inspected to find why numbers were missed. So no other row in either table counts phone numbers; phone numbers are listed separately in the pseudonymization table only, may be optimistic, and are for reference only.
-- The 3-layer model scores slightly higher on birthdays and dates, mostly by a single item (there are 41 birthdays, for example); the 6-layer model is steadier on names and addresses, so it is the default.
-- **Synthetic legal test set** (`eval/data/synthetic_legal_test.jsonl`): 75 fictional complaints, judgments, transcripts, certified letters, chat logs, emails and similar documents, 21,823 characters in total. The set was sealed before any evaluation, and its errors were never inspected during development (except for phone numbers, see above). It marks 462 names to replace, 51 names in official roles, and 498 other personal-data values (74 of them phone numbers). Each document is tagged with its difficulty types: 1 rare surnames, indigenous and foreign names; 2 names that look like ordinary words; 3 OCR noise; 4 the same value written in several ways; 5 names to keep next to names to replace; 6 general documents.
-- **tw-PII-bench** ([lianghsun/tw-PII-bench](https://huggingface.co/datasets/lianghsun/tw-PII-bench), Liang Hsun Huang, Apache-2.0): the 453 items with `crc32(id) % 2 == 1`, scored in general mode. The person-name category is not reported because person names across the whole benchmark were inspected during development, before the split; phone numbers are listed separately (see above).
-- "Fully replaced" and "fully masked" mean every character of the annotated value was replaced; partial replacement counts as a miss. Direct identifiers are names, national IDs, phone numbers, emails, URLs, account numbers, passwords, license plates, social-media handles and similar values; indirect identifiers (birthdays, addresses, dates) count as generalized when they were reduced, with the kept city or county excluded for addresses.
-- The pseudonymization table measures detection (model decisions); the anonymization table measures actual output (a name is also replaced where it must be replaced elsewhere in the document, so names in official roles are kept less often there).
-- Anonymization numbers are measured on the actual output: a direct identifier's output must not keep any of the original value (a password replaced as if it were a date, leaving 1986年, counts as a miss), a birthday may keep only the year, and a date may not keep the day.
-- Code pseudonymization uses the same replacement as anonymization: direct identifiers, birthdays, addresses and names in official roles score the same as in the table above; the difference is that personal-event dates are kept (96.6% for 6-layer and 97.5% for 3-layer on the synthetic legal documents).
-- In legal mode, birthdays are fully replaced 92.7% of the time with 6 layers and 95.1% with 3 layers; personal-event dates are kept 96.6% and 97.5% of the time.
+| Summary | 6-layer (default) | 3-layer |
+|---|---|---|
+| Recall, names (synthetic legal documents) | 92.6% | 91.6% |
+| Recall, other personal data (synthetic legal documents, excluding phone numbers) | 93.2% | 94.1% |
+| Recall, other personal data (tw-PII-bench, excluding names and phone numbers) | 96.3% | 95.6% |
+| Precision (synthetic legal documents, excluding organizations) | 98.5% | 97.9% |
+| Precision (tw-PII-bench, excluding names and organizations) * | 86.1% | 84.7% |
+| Names in official roles kept (synthetic legal documents) | 98.0% | 98.0% |
+| Speed: find and replace in one document of about 100,000 characters (Apple M5 Max CPU) | about 12 s | about 8 s |
+
+\* tw-PII-bench leaves some personal emails and personal dates unannotated; replacing them counts against us, so this row is lower. See the notes below.
+
+### By category (6-layer)
+
+Recall, by annotated category:
+
+| Category | Synthetic legal documents | tw-PII-bench |
+|---|---|---|
+| Names | 92.6% (428/462) | — |
+| National IDs, resident permits, passports | 92.1% (70/76) | 100.0% (254/254) |
+| NHI cards, driver's licenses, household numbers and other IDs | — | 99.2% (528/532) |
+| Account and card numbers | 97.6% (40/41) | 92.7% (203/219) |
+| Business ID numbers | — | 100.0% (138/138) |
+| Passwords and verification codes | 100.0% (9/9) | 99.4% (157/158) |
+| License plates | 90.9% (20/22) | 99.4% (169/170) |
+| Emails | 91.7% (11/12) | 99.5% (221/222) |
+| URLs | 100.0% (4/4) | 87.1% (115/132) |
+| Social-media handles | 100.0% (11/11) | 94.2% (245/260) |
+| Addresses | 91.1% (82/90) | 94.7% (214/226) |
+| Birthdays | 92.7% (38/41) | — |
+| Personal-event dates | 93.2% (110/118) | — |
+| Dates (birthdays and events not distinguished) | — | 89.9% (277/308) |
+| Phone numbers (reference only) | 95.9% (71/74) | 96.1% (268/279) |
+
+Precision, by the type we output:
+
+| Category | Synthetic legal documents | tw-PII-bench |
+|---|---|---|
+| Names | 99.8% (429/430) | — |
+| Alphanumeric codes (IDs, passports, plates, etc.) | 98.1% (103/105) | 95.5% (1050/1099) |
+| Digit numbers (accounts, business IDs, etc.) | 94.2% (49/52) | 90.5% (591/653) |
+| Emails | 100.0% (11/11) | 66.2% (221/334) |
+| URLs | 100.0% (4/4) | 99.1% (116/117) |
+| Social-media handles | 100.0% (4/4) | 92.9% (52/56) |
+| Addresses | 100.0% (83/83) | 95.1% (214/225) |
+| Birthdays and other identity dates | 100.0% (37/37) | 89.4% (101/113) |
+| Personal-event dates | 94.0% (109/116) | 53.3% (177/332) |
+
+<details>
+<summary>By category, 3-layer</summary>
+
+| Category | Synthetic legal documents | tw-PII-bench |
+|---|---|---|
+| Names | 91.6% (423/462) | — |
+| National IDs, resident permits, passports | 96.1% (73/76) | 100.0% (254/254) |
+| NHI cards, driver's licenses, household numbers and other IDs | — | 98.5% (524/532) |
+| Account and card numbers | 95.1% (39/41) | 95.9% (210/219) |
+| Business ID numbers | — | 100.0% (138/138) |
+| Passwords and verification codes | 100.0% (9/9) | 95.6% (151/158) |
+| License plates | 95.5% (21/22) | 98.8% (168/170) |
+| Emails | 91.7% (11/12) | 100.0% (222/222) |
+| URLs | 100.0% (4/4) | 90.9% (120/132) |
+| Social-media handles | 100.0% (11/11) | 89.6% (233/260) |
+| Addresses | 90.0% (81/90) | 89.8% (203/226) |
+| Birthdays | 95.1% (39/41) | — |
+| Personal-event dates | 94.1% (111/118) | — |
+| Dates (birthdays and events not distinguished) | — | 91.2% (281/308) |
+| Phone numbers (reference only) | 95.9% (71/74) | 94.6% (264/279) |
+
+| Category | Synthetic legal documents | tw-PII-bench |
+|---|---|---|
+| Names | 99.5% (420/422) | — |
+| Alphanumeric codes (IDs, passports, plates, etc.) | 97.2% (105/108) | 95.6% (1031/1079) |
+| Digit numbers (accounts, business IDs, etc.) | 98.0% (49/50) | 89.4% (596/667) |
+| Emails | 100.0% (11/11) | 65.1% (222/341) |
+| URLs | 100.0% (4/4) | 99.2% (121/122) |
+| Social-media handles | 100.0% (4/4) | 92.7% (51/55) |
+| Addresses | 98.8% (82/83) | 95.3% (203/213) |
+| Birthdays and other identity dates | 94.9% (37/39) | 88.4% (99/112) |
+| Personal-event dates | 92.5% (111/120) | 49.3% (183/371) |
+
+</details>
+
+- **Phone numbers are for reference only**: while developing 0.3.0, the phone-number errors in both test sets were inspected to find why numbers were missed, so these numbers may be optimistic and are left out of the summary.
+- **No names for tw-PII-bench**: person names across the whole benchmark were inspected during development, before the split.
+- **No organizations**: neither test set annotates organizations.
+- **Precision leaves out phone numbers**: a digit-number prediction that touches a phone annotation is not counted (this removes only correct ones, so the numbers are conservative).
+- **Precision is grouped by output type**: alphanumeric codes and digit numbers each cover several kinds of ID, so the two tables do not use exactly the same categories. A replaced value counts as correct if it touches any annotation.
+- **Low precision for emails and personal-event dates on tw-PII-bench**: we sampled values that matched no annotation in the development half (the other half, which may be inspected):
+  - Emails, 40 sampled: 39 were personal addresses of senders and recipients in email headers that the benchmark leaves unannotated; 1 was an agency's official mailbox that we replaced unnecessarily.
+  - Personal-event dates, 40 sampled: about 60% were personal dates such as hospital visits, accidents and lease terms that the benchmark leaves unannotated; about 40% were letter dates, deadlines and policy effective dates that we replaced unnecessarily. Personal-event dates are replaced only in general mode (`--general`); the default legal mode leaves them alone.
+- **6-layer vs 3-layer**: the 3-layer model scores slightly higher on a few categories such as national IDs and birthdays; the 6-layer model is steadier on names and addresses and has higher precision, so it is the default.
+
+### Test sets
+
+| Test set | Contents | Scoring |
+|---|---|---|
+| Synthetic legal documents (`eval/data/synthetic_legal_test.jsonl`) | 75 fictional complaints, judgments, transcripts, certified letters, chat logs, emails and similar documents, 21,823 characters in total; 462 names to replace, 51 names in official roles, and 498 other personal-data values (74 of them phone numbers). The set was sealed before any evaluation, and its errors were never inspected during development (except for phone numbers) | General mode |
+| [tw-PII-bench](https://huggingface.co/datasets/lianghsun/tw-PII-bench) (Liang Hsun Huang, Apache-2.0) | The 453 items with `crc32(id) % 2 == 1` (the test half) | General mode; no names, phone numbers for reference only |
+
+Each synthetic document is tagged with its difficulty types: 1 rare surnames, indigenous and foreign names; 2 names that look like ordinary words; 3 OCR noise; 4 the same value written in several ways; 5 names to keep next to names to replace; 6 general documents.
+
+### Anonymization and code pseudonymization
+
+The numbers above measure detection (model decisions). Anonymization is measured on the actual output: direct identifiers (names, national IDs, phone numbers, emails, URLs, account numbers, passwords, license plates, social-media handles and similar values) must be replaced in full and must not keep any of the original value (a password replaced as if it were a date, leaving 1986年, counts as a miss); a birthday may keep only the year, a date may not keep the day, and an address must be replaced in full apart from the kept city or county. A name is also replaced where it must be replaced elsewhere in the document, so names in official roles are kept less often than in pseudonymization.
+
+| Anonymization (`Anonymizer` defaults) | Synthetic: 6-layer | Synthetic: 3-layer | tw-PII-bench: 6-layer | tw-PII-bench: 3-layer |
+|---|---|---|---|---|
+| Direct identifiers fully masked (excluding phone numbers; also names for tw-PII-bench) | 94.3% | 93.6% | 97.4% | 97.0% |
+| Birthdays reduced to the year | 92.7% | 95.1% | — | — |
+| Addresses reduced to the city or county | 86.7% | 85.6% | 94.7% | 89.8% |
+| Personal-event dates reduced to year and month | 93.2% | 94.1% | — | — |
+| Dates generalized (birthdays and events not distinguished) | — | — | 90.3% | 91.6% |
+| Names in official roles kept | 96.1% | 96.1% | — | — |
+
+Code pseudonymization uses the same replacement as anonymization, so direct identifiers, birthdays, addresses and names in official roles score the same as above. How each output handles dates (synthetic legal documents, 6-layer / 3-layer):
+
+| Output | Birthdays | Personal-event dates |
+|---|---|---|
+| Realistic pseudonymization, legal mode (default) | fully replaced 92.7% / 95.1% | kept 96.6% / 97.5% |
+| Realistic pseudonymization, general mode | fully replaced 92.7% / 95.1% | fully replaced 93.2% / 94.1% |
+| Code pseudonymization | year only 92.7% / 95.1% | kept 96.6% / 97.5% |
+| Anonymization | year only 92.7% / 95.1% | year and month only 93.2% / 94.1% |
 
 ## Scope and known limitations
 
@@ -153,10 +268,20 @@ Measured with weights-v2 (package 0.3.0). Reproduce with `python eval/reproduce.
 **Design trade-offs** (working as designed; good to know before use):
 
 - Anonymization only handles the direct and indirect identifiers listed above; ages, occupations, schools, family relationships, details of events, and the type, industry and city words kept in company names (顧問 in A顧問股份有限公司) are not handled.
-- When restoring the code version, a lone code is not restored where it forms an ordinary word (甲方, 甲說, 甲級); a lone company letter is restored only after a party reference such as 被告A or （下稱A）; for A公司, and for a party reference followed by a company type or industry word (被告A科技, 被告A集團), only the letter goes back to the brand and the rest stays when the brand can be separated from the name (澄嶼公司, 澄嶼科技); a letter that forms an ordinary word with the next character is left alone (A棟, A咖, X光), and so are 維生素A and A/B測試; values reduced to a year, a month or a city are not restored (the details are gone); a token such as 〔電話1〕 rewritten in some other form is not restored either.
 - When several people share a surname, a reference by surname alone (陳小姐) cannot be tied to one person and becomes 〇小姐.
 - Codes are consistent only within one `Anonymizer` or one command; across separate batches, 甲 in one batch is not the same person as 甲 in another. When `Anonymizer.anonymize()` is called document by document and a later document already uses a code assigned earlier, that person gets a new code in that document and a warning is issued; process a batch with `anonymize_many()` or the command line instead.
 - With a shared case mapping (`--map`), if a fake name from an earlier document happens to be a real name in a later one, that entry is disabled and later documents use a new fake name; restore AI replies about each document with that document's own mapping file.
+
+When restoring AI replies with the code version, these forms are handled as follows:
+
+| Form | Restored? | Examples |
+|---|---|---|
+| A lone code that forms an ordinary word with the characters around it | No | 甲方, 甲說, 甲級 |
+| A lone company letter | Only after a party reference | 被告A, （下稱A） |
+| A公司, and a party reference followed by a company type or industry word | When the brand can be separated from the name, only the letter goes back to the brand and the rest stays | A公司 → 澄嶼公司, 被告A科技 → 被告澄嶼科技, 被告A集團 |
+| A letter that forms an ordinary word with the next character | No | A棟, A咖, X光; 維生素A and A/B測試 are left alone too |
+| Values reduced to a year, a month or a city | No (the details are gone) | 民國71年 |
+| A token such as 〔電話1〕 rewritten in some other form | Cannot be restored | — |
 
 ## How it works
 
@@ -164,7 +289,54 @@ Measured with weights-v2 (package 0.3.0). Reproduce with `python eval/reproduce.
 2. **Decisions (model)**: each text window goes through the model once, which decides *replace / keep / ignore* for every candidate in it. The model is fine-tuned from bert-base-chinese and distilled from 12 layers into 6 and 3 layers, running on CPU through ONNX.
 3. **Replacement (program)**: realistic fakes, or codes and generalization by type (pseudonymization, masking and generalization in the terms of ISO/IEC 20889); consistent across the document, and other spellings of the same value elsewhere are replaced too.
 
-Training data: public court judgments (the names of parties, representatives, judges, clerks and others listed in each judgment are first replaced consistently with fake names), synthetic legal documents, and programmatic augmentation. The training code is in `taiwan_legal_deid/train.py` (MLX, Apple Silicon) and must be run from the repository, since it reads and writes the repository's `data/` folder; the training data is not published.
+Training data: public court judgments (the names of parties, representatives, judges, clerks and others listed in each judgment are first replaced consistently with fake names), synthetic legal documents, and programmatic augmentation, about 50,000 documents in all; the training data is not published.
+
+## Training on your own data
+
+All the training code is public, so you can train on documents you have annotated yourself. Before you start:
+
+| Item | Details |
+|---|---|
+| Hardware | Training runs only on Apple Silicon (MLX); once exported to ONNX, the model runs on any CPU |
+| Starting point | The released weights are ONNX for inference and cannot be trained further; training starts from bert-base-chinese |
+| Data | Our training data is not published, so you need your own annotated documents (format below); the code that builds our data is in the repository, but it needs source files we have not released |
+| Time | With our roughly 50,000 documents, each model (12, 6 and 3 layers) takes about 30–35 minutes on an Apple M5 Max |
+
+Run from the repository root:
+
+```bash
+python -m venv .venv && .venv/bin/pip install -e ".[train]"                  # training (MLX)
+python -m venv .venv-export && .venv-export/bin/pip install -e ".[export]"  # ONNX export (PyTorch)
+# download google-bert/bert-base-chinese to base/bert-base-chinese and save your data as data/train/synth_docs.jsonl
+.venv/bin/python -m taiwan_legal_deid.train --base base/bert-base-chinese --out runs/base --epochs 3   # train the 12-layer model first
+.venv/bin/python -m taiwan_legal_deid.train --base base/bert-base-chinese --out runs/g6 --teacher runs/base --layers 0,1,2,3,4,5 --lr-enc 1e-4 --epochs 4   # distill into 6 layers (3 layers: --layers 0,1,2)
+.venv-export/bin/python -m taiwan_legal_deid.export_onnx runs/g6             # export to ONNX
+taiwan-legal-deid complaint.txt --model runs/g6                              # use your model; in Python, Detector("runs/g6")
+```
+
+The data has one JSON document per line (the content is fictional):
+
+```json
+{"id": "doc-001", "text": "原告陳美玲，民國71年3月8日生，手機 0912-345-678，113年5月2日到職。被告訴訟代理人王大同律師。", "spans": [{"start": 2, "end": 5, "label": "MASK", "group": "person"}, {"start": 6, "end": 15, "label": "MASK", "group": "pii"}, {"start": 20, "end": 32, "label": "MASK", "group": "pii"}, {"start": 33, "end": 41, "label": "KEEP", "group": "pii"}, {"start": 51, "end": 54, "label": "KEEP", "group": "person"}], "annot": ["person", "pii"]}
+```
+
+| Field | Contents |
+|---|---|
+| `id` | A unique document ID; the training code holds out 10% of documents for validation based on the ID |
+| `text` | The original text |
+| `spans` | One entry per annotation: `start` and `end` are character offsets (`end` exclusive); `label` is `MASK` (replace) or `KEEP` (keep); `group` is `person` (names), `pii` (other personal data) or `org` (organizations) |
+| `annot` | The groups annotated completely in this document. In a listed group, every candidate without an annotation is treated as *ignore*; for groups not listed, only the annotated values are used |
+
+Annotation rules:
+
+| Value | How to annotate |
+|---|---|
+| Names | Mark only the name itself (王大同, without 律師); private persons such as parties and witnesses are `MASK`, people acting in an official role are `KEEP` |
+| Dates | Birthdays and other identity dates are `MASK`; personal-event dates (start of employment, hospital visits and so on) are `KEEP` (replaced in general mode, left alone in legal mode); dates unrelated to a person, such as court dates, are not annotated |
+| Organizations | Private companies are `MASK`, government agencies are `KEEP` |
+| Boundaries | An annotation must cover exactly the same span as a candidate listed by the program; candidates with different boundaries are treated as *ignore* |
+
+After training, `python eval/reproduce.py --model runs/g6` measures your model on the same test sets. See [`AGENTS.md`](AGENTS.md) for command and option details.
 
 ## Enterprise deployment & customization
 

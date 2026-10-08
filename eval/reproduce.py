@@ -1,10 +1,11 @@
 """重跑 README 的數字。
     pip install -e . pyarrow
-    python eval/reproduce.py [--model 6l|3l]      （不給＝兩個都跑）
+    python eval/reproduce.py [--model 6l|3l|<模型資料夾>]      （不給＝6l、3l 都跑）
 1. tw-PII-bench（Liang Hsun Huang，Apache-2.0）測試半 453 份：固定版本、驗 sha256；切分 crc32(id) % 2 == 1。
    README 的總分不含人名、電話：人名類別在切分之前整份看過；電話在 0.3.0 開發時看過錯題（另列只供參考）。
 2. 合成法律文件測試集（eval/data/synthetic_legal_test.jsonl，75 份，虛構內容）。
 3. 匿名化（Anonymizer 預設）與代號假名化（style="code"）：直接識別資料有沒有整個換掉、間接識別資料（生日、地址、日期）有沒有粗化。偵測跟假名化同一份。
+4. 各類別的召回與精確度（README 的分類表，印成 Markdown）。
 """
 import json, os, re, sys, zlib
 from collections import defaultdict
@@ -25,6 +26,49 @@ BENCH_SHA = {"short": "03e4850a0a97a2b5cb046c1dcd3996b42c5eea3766ae2618d4bbf6439
 # 開發時看過錯題的類別，不算進總分（另列只供參考）：bench 的人名在切分之前整份看過；
 # 電話在 0.3.0 開發時為了找漏網原因，看過 bench 和合成法律文件的錯題（合成法律文件的直接識別資料也因此不含電話）
 SEEN_BENCH = {"private_person", "private_phone"}
+
+
+# README 分類表：召回看標註類別（標註的值整個被換掉才算，任何類型的預測都算）；精確度看輸出類型（換掉的值碰到任何標註就算對）。
+# 機構不算精確度（兩份考題都沒標機構）；bench 的人名兩邊都不算（切分前看過）
+GOLD_CAT = {"P": "人名", **dict.fromkeys(("ID", "tw_national_id", "tw_passport"), "身分證、居留證、護照"),
+            **dict.fromkeys(("tw_nhi_card", "tw_driver_license", "tw_household_no", "tw_medical_license", "tw_military_id"), "健保卡、駕照、戶號等證號"),
+            **dict.fromkeys(("ACCT", "account_number"), "帳號、卡號"), "tw_company_id": "統一編號", **dict.fromkeys(("SEC", "secret"), "密碼、驗證碼"),
+            **dict.fromkeys(("CAR", "tw_license_plate"), "車牌"), **dict.fromkeys(("MAIL", "private_email"), "Email"),
+            **dict.fromkeys(("URL", "private_url"), "網址"), **dict.fromkeys(("HDL", "tw_line_id", "tw_ptt_id"), "社群帳號"),
+            **dict.fromkeys(("ADDR", "private_address"), "地址"), "BIRTH": "生日", "DATE": "個人行程日期", "private_date": "日期（不分生日、行程）",
+            **dict.fromkeys(("TEL", "private_phone"), "電話（只供參考）")}
+OUT_CAT = {"PERSON": "人名", "CODE": "英數代碼（身分證、護照、車牌等）", "NUMBER": "數字號碼（帳號、統編等）", "EMAIL": "Email",
+           "URL": "網址", "HANDLE": "社群帳號", "ADDRESS": "地址", "DATE": "生日等身分日期", "DATE_EVENT": "個人行程日期"}
+
+
+def by_category(golds, masks, skip=(), seen=()):
+    """golds：每份 [(起, 訖, 標註類別)]（不含保留的人名）；masks：每份 [(起, 訖, 輸出類型)]（一般模式要換的全部）；
+    skip：不算精確度的輸出類型；seen：開發時看過錯題的標註類別（電話），碰到它的預測不算精確度（只拿掉換對的，偏保守）。
+    回傳 (召回, 精確度)，都是 {類別: [對, 共]}。"""
+    rec, pre = defaultdict(lambda: [0, 0]), defaultdict(lambda: [0, 0])
+    for gold, ms in zip(golds, masks):
+        for s, e, lab in gold:
+            if lab in GOLD_CAT:
+                r = rec[GOLD_CAT[lab]]
+                r[0] += all(any(a <= i < b for a, b, _ in ms) for i in range(s, e)); r[1] += 1
+        for a, b, t in ms:
+            if t in OUT_CAT and t not in skip and not any(s < b and e > a for s, e, lab in gold if lab in seen):
+                p = pre[OUT_CAT[t]]
+                p[0] += any(s < b and e > a for s, e, _ in gold); p[1] += 1
+    return rec, pre
+
+
+def category_tables(name, cols):
+    """cols：[(欄名, (召回, 精確度))]，印成 README 的 Markdown 表格。"""
+    pct = lambda d, k: f"{d[k][0] / d[k][1]:.1%}（{d[k][0]}/{d[k][1]}）" if d.get(k, [0, 0])[1] else "—"
+    for title, i, cats in (("召回（該換的值整個換掉）", 0, dict.fromkeys(GOLD_CAT.values())), ("精確度（換掉的值確實是個資）", 1, OUT_CAT.values())):
+        print(f"\n{name}｜{title}\n| 類別 | " + " | ".join(c for c, _ in cols) + " |\n|---|" + "---|" * len(cols))
+        for k in cats:
+            if any(x[i].get(k, [0, 0])[1] for _, x in cols):
+                print(f"| {k} | " + " | ".join(pct(x[i], k) for _, x in cols) + " |")
+    for c, (_, pre) in cols:
+        ok, n = sum(v[0] for v in pre.values()), sum(v[1] for v in pre.values())
+        print(f"→ {name}｜{c}：精確度 " + (f"{ok / n:.1%}（{ok}/{n}）" if n else "—"))  # 只認人名的舊模型在 bench 沒有可計分的預測
 
 
 def load_bench():
@@ -110,6 +154,11 @@ def main():
                     tot[tag == "TEL"][0] += all(any(a <= i < b for a, b in ms) for i in range(s0, e0)); tot[tag == "TEL"][1] += 1
         print(f"→ {m}｜合成法律文件，電話以外的其他個資完整蓋住：{tot[False][0] / tot[False][1]:.1%}（{tot[False][0]}/{tot[False][1]}）")
         print(f"→ {m}｜合成法律文件，電話完整蓋住（開發時看過錯題，只供參考）：{tot[True][0] / tot[True][1]:.1%}（{tot[True][0]}/{tot[True][1]}）")
+        span3 = lambda xs: [(x["start"], x["end"], x["type"]) for x in xs]
+        category_tables(m, [
+            ("合成法律文件", by_category([[g for g in parse(it["text"])[1] if g[2] != "K"] for it in synth], [span3(p["spans"] + p["pii"]) for p in ps], seen={"TEL"})),
+            ("tw-PII-bench 測試半", by_category([[(g["start"], g["end"], g["label"]) for g in r["spans"]] for r in bench],
+                                               [span3(p["spans"]) for p in preds], skip={"PERSON"}, seen=SEEN_BENCH))])
         quasi = {"BIRTH": "生日", "ADDR": "地址", "DATE": "個人行程日期"}
         anon(f"{m}｜匿名化・合成法律文件", [r["text"] for r in synth_items], raw_synth, [parse(it["text"])[1] for it in synth],
              {"P", "ID", "MAIL", "URL", "ACCT", "SEC", "CAR", "HDL"}, quasi, keep={"K"})
