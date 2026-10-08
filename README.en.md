@@ -16,20 +16,6 @@ It is designed with reference to the de-identification technique classification 
 - **Legal mode (default)**: when pseudonymizing, dates of personal events are left unchanged, so an AI can still reason about periods and deadlines. Land lot numbers keep the section name and are replaced consistently across the case.
 - **Runs locally on CPU**: no GPU needed, and no network access except for downloading the model the first time. The mapping table is a JSON file on your computer.
 
-How each kind of value is replaced:
-
-| Value | Realistic pseudonymization (default) | Code pseudonymization | Anonymization |
-|---|---|---|---|
-| Names | The same person gets the same fake name across the document, with surname and given name mapped separately (陳小姐 → 郭小姐) | 甲, 乙 and so on; the same person gets the same code across the document, and references by surname, given name or nickname get that code when they match exactly one full name; when several people share the surname they become 〇, so no one is mixed up | Same as code pseudonymization |
-| Private companies | A realistic fake company name; listed-company short names and "下稱" aliases follow | Only the brand becomes a letter (澄嶼顧問股份有限公司 → A顧問股份有限公司), and "下稱" aliases follow (澄嶼公司 → A公司) | Same as code pseudonymization |
-| National IDs | A fake number with a valid checksum | 〔身分證1〕 | Same as code pseudonymization |
-| Phone numbers, emails, URLs and similar | Randomly generated fakes | Numbered tokens such as 〔電話1〕 | Same as code pseudonymization |
-| Addresses | Real road names in the same city | City or county only | City or county only |
-| Birthdays | Year kept (so ages stay the same) | Year only | Year only |
-| Personal-event dates | Unchanged in legal mode; shifted across the document in general mode | Unchanged in legal mode; year and month only in general mode | Year and month only (court and filing dates are kept; adjustable in Python) |
-
-Codes avoid characters the text already uses (if the text has 甲方, 甲 is not used as a code). Anonymization uses codes and keeps no mapping table.
-
 > Pseudonymization keeps a mapping table, and anyone with it can restore the original text: keep the table as carefully as the personal data itself, and store it separately from the pseudonymized text. Anonymization keeps no table and cannot be reversed, but it does not guarantee anonymity in the legal sense: the story told in the text can still reveal who someone is, and whether the output is anonymous in the legal sense depends on the context and is for you to judge. The tool will miss things; always check by hand before sharing. Anonymized output consists of codes, so a missed real name stands out: check it all the more carefully before it leaves your hands.
 
 ## Example
@@ -51,6 +37,20 @@ Anonymization (the only differences from the code version: personal-event dates 
 > 原告甲（身分證 〔身分證1〕，民國71年生，住臺中市〔地址1〕，手機 〔電話1〕）與被告A顧問股份有限公司（下稱A公司）間確認僱傭關係存在事件。原告自113年5月起任職於A公司，甲小姐主張A公司違法解僱。被告訴訟代理人王大同律師。法官宋芷蘅。
 
 All examples are fictional. The names, company names, IDs, phone numbers and addresses produced by the realistic version are random and may happen to match real people, companies, numbers or addresses.
+
+### How each kind of value is replaced
+
+| Value | Realistic pseudonymization (default) | Code pseudonymization | Anonymization |
+|---|---|---|---|
+| Names | The same person gets the same fake name across the document, with surname and given name mapped separately (陳小姐 → 郭小姐) | 甲, 乙 and so on; the same person gets the same code across the document, including references by surname, given name or nickname that match a full name | Same as code pseudonymization |
+| Private companies | A realistic fake company name; listed-company short names and "下稱" aliases follow | Only the brand becomes a letter (澄嶼顧問股份有限公司 → A顧問股份有限公司), and "下稱" aliases follow (澄嶼公司 → A公司) | Same as code pseudonymization |
+| National IDs | A fake number with a valid checksum | 〔身分證1〕 | Same as code pseudonymization |
+| Phone numbers, emails, URLs and similar | Randomly generated fakes | Numbered tokens such as 〔電話1〕 | Same as code pseudonymization |
+| Addresses | Real road names in the same city | City or county only | City or county only |
+| Birthdays | Year kept (so ages stay the same) | Year only | Year only |
+| Personal-event dates | Unchanged in legal mode; shifted across the document in general mode | Unchanged in legal mode; year and month only in general mode | Year and month only (court and filing dates are kept; adjustable in Python) |
+
+Codes avoid characters the text already uses (if the text has 甲方, 甲 is not used as a code). Anonymization uses codes and keeps no mapping table.
 
 ## Install
 
@@ -122,10 +122,10 @@ Run `taiwan-legal-deid --download` (add `--model 3l` for the 3-layer model) on a
 
 Measured with weights-v2 (package 0.3.0). Reproduce with `python eval/reproduce.py` (also needs `pip install pyarrow`). All three outputs share one detection step, so a value the detector misses is missed by all three.
 
-| Term | Meaning |
-|---|---|
-| Recall | Of the values that should be replaced, the share replaced in full (partial replacement counts as a miss) |
-| Precision | Of the values replaced, the share that really are personal data (the rest were replaced unnecessarily) |
+| Term | Meaning | How it is scored |
+|---|---|---|
+| Recall | Of the values that should be replaced, the share that were replaced | Every character of the annotated value must be replaced; partial replacement counts as a miss |
+| Precision | Of the values replaced, the share that really are personal data (the rest were replaced unnecessarily) | A replaced value counts as correct if it touches any annotation |
 
 **All numbers on this page come from synthetic test sets. Synthetic data is usually simpler than real documents, so real-world results may be lower. Always check by hand before sharing.**
 
@@ -139,7 +139,7 @@ Measured with weights-v2 (package 0.3.0). Reproduce with `python eval/reproduce.
 | Names in official roles kept (synthetic legal documents) | 98.0% | 98.0% |
 | Speed: find and replace in one document of about 100,000 characters (Apple M5 Max CPU) | about 12 s | about 8 s |
 
-\* tw-PII-bench leaves some personal emails and personal dates unannotated; replacing them counts against us, so this row is lower. See the notes below.
+\* Some personal emails and personal dates are outside tw-PII-bench's annotation scope, so replacing them counts as unnecessary; some others really were replaced unnecessarily. See the spot check below.
 
 ### By category (6-layer)
 
@@ -180,6 +180,8 @@ Precision, by the type we output:
 <details>
 <summary>By category, 3-layer</summary>
 
+Recall, by annotated category:
+
 | Category | Synthetic legal documents | tw-PII-bench |
 |---|---|---|
 | Names | 91.6% (423/462) | — |
@@ -197,6 +199,8 @@ Precision, by the type we output:
 | Personal-event dates | 94.1% (111/118) | — |
 | Dates (birthdays and events not distinguished) | — | 91.2% (281/308) |
 | Phone numbers (reference only) | 95.9% (71/74) | 94.6% (264/279) |
+
+Precision, by the type we output:
 
 | Category | Synthetic legal documents | tw-PII-bench |
 |---|---|---|
@@ -216,10 +220,10 @@ Precision, by the type we output:
 - **No names for tw-PII-bench**: person names across the whole benchmark were inspected during development, before the split.
 - **No organizations**: neither test set annotates organizations.
 - **Precision leaves out phone numbers**: a digit-number prediction that touches a phone annotation is not counted (this removes only correct ones, so the numbers are conservative).
-- **Precision is grouped by output type**: alphanumeric codes and digit numbers each cover several kinds of ID, so the two tables do not use exactly the same categories. A replaced value counts as correct if it touches any annotation.
-- **Low precision for emails and personal-event dates on tw-PII-bench**: we sampled values that matched no annotation in the development half (the other half, which may be inspected):
-  - Emails, 40 sampled: 39 were personal addresses of senders and recipients in email headers that the benchmark leaves unannotated; 1 was an agency's official mailbox that we replaced unnecessarily.
-  - Personal-event dates, 40 sampled: about 60% were personal dates such as hospital visits, accidents and lease terms that the benchmark leaves unannotated; about 40% were letter dates, deadlines and policy effective dates that we replaced unnecessarily. Personal-event dates are replaced only in general mode (`--general`); the default legal mode leaves them alone.
+- **Precision is grouped by output type**: alphanumeric codes and digit numbers each cover several kinds of ID, so the two tables do not use exactly the same categories.
+- **Low precision for emails and personal-event dates on tw-PII-bench**: we sampled values that matched no annotation in the other half, used for development (which may be inspected):
+  - Emails, 40 sampled: 39 were personal addresses of senders and recipients in email headers, outside the benchmark's annotation scope; 1 was an agency's official mailbox that we replaced unnecessarily.
+  - Personal-event dates, 40 sampled: about 60% were personal dates such as hospital visits, accidents and lease terms, outside the benchmark's annotation scope; about 40% were letter dates, deadlines and policy effective dates that we replaced unnecessarily. Personal-event dates are replaced only in general mode (`--general`); the default legal mode leaves them alone.
 - **6-layer vs 3-layer**: the 3-layer model scores slightly higher on a few categories such as national IDs and birthdays; the 6-layer model is steadier on names and addresses and has higher precision, so it is the default.
 
 ### Test sets
@@ -299,7 +303,8 @@ All the training code is public, so you can train on documents you have annotate
 |---|---|
 | Hardware | Training runs only on Apple Silicon (MLX); once exported to ONNX, the model runs on any CPU |
 | Starting point | The released weights are ONNX for inference and cannot be trained further; training starts from bert-base-chinese |
-| Data | Our training data is not published, so you need your own annotated documents (format below); the code that builds our data is in the repository, but it needs source files we have not released |
+| Data | Our training data is not published, so you need your own annotated documents (format below); the code that builds our data is in the repository, but its inputs are not: a local cache database (SQLite) of public court judgments, and the annotated drafts of our fictional synthetic documents |
+| Personal data | If the documents you annotate come from real cases, they are personal data themselves: process them only on your own machines, never upload them or paste them into an issue, and make sure you have a lawful basis for processing them |
 | Time | With our roughly 50,000 documents, each model (12, 6 and 3 layers) takes about 30–35 minutes on an Apple M5 Max |
 
 Run from the repository root:
@@ -307,9 +312,11 @@ Run from the repository root:
 ```bash
 python -m venv .venv && .venv/bin/pip install -e ".[train]"                  # training (MLX)
 python -m venv .venv-export && .venv-export/bin/pip install -e ".[export]"  # ONNX export (PyTorch)
-# download google-bert/bert-base-chinese to base/bert-base-chinese and save your data as data/train/synth_docs.jsonl
+# download google-bert/bert-base-chinese to base/bert-base-chinese; if it only has pytorch_model.bin, first run
+#   .venv-export/bin/python -m taiwan_legal_deid.convert_base base/bert-base-chinese
+# save your data as data/train/synth_docs.jsonl (the file name is fixed)
 .venv/bin/python -m taiwan_legal_deid.train --base base/bert-base-chinese --out runs/base --epochs 3   # train the 12-layer model first
-.venv/bin/python -m taiwan_legal_deid.train --base base/bert-base-chinese --out runs/g6 --teacher runs/base --layers 0,1,2,3,4,5 --lr-enc 1e-4 --epochs 4   # distill into 6 layers (3 layers: --layers 0,1,2)
+.venv/bin/python -m taiwan_legal_deid.train --base base/bert-base-chinese --out runs/g6 --teacher runs/base --layers 0,1,2,3,4,5 --lr-enc 1e-4 --epochs 4   # distill into 6 layers (3 layers: --out runs/g3 --layers 0,1,2)
 .venv-export/bin/python -m taiwan_legal_deid.export_onnx runs/g6             # export to ONNX
 taiwan-legal-deid complaint.txt --model runs/g6                              # use your model; in Python, Detector("runs/g6")
 ```
@@ -336,7 +343,7 @@ Annotation rules:
 | Organizations | Private companies are `MASK`, government agencies are `KEEP` |
 | Boundaries | An annotation must cover exactly the same span as a candidate listed by the program; candidates with different boundaries are treated as *ignore* |
 
-After training, `python eval/reproduce.py --model runs/g6` measures your model on the same test sets. See [`AGENTS.md`](AGENTS.md) for command and option details.
+After training, `python eval/reproduce.py --model runs/g6` measures your model on the same test sets. See [`AGENTS.md`](https://github.com/lawchat-oss/taiwan-legal-deid/blob/main/AGENTS.md) for command and option details.
 
 ## Enterprise deployment & customization
 

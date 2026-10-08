@@ -5,7 +5,7 @@
    README 的總分不含人名、電話：人名類別在切分之前整份看過；電話在 0.3.0 開發時看過錯題（另列只供參考）。
 2. 合成法律文件測試集（eval/data/synthetic_legal_test.jsonl，75 份，虛構內容）。
 3. 匿名化（Anonymizer 預設）與代號假名化（style="code"）：直接識別資料有沒有整個換掉、間接識別資料（生日、地址、日期）有沒有粗化。偵測跟假名化同一份。
-4. 各類別的召回與精確度（README 的分類表，印成 Markdown）。
+4. 各類別的召回與精確率（README 的分類表，印成 Markdown）。
 """
 import json, os, re, sys, zlib
 from collections import defaultdict
@@ -28,8 +28,8 @@ BENCH_SHA = {"short": "03e4850a0a97a2b5cb046c1dcd3996b42c5eea3766ae2618d4bbf6439
 SEEN_BENCH = {"private_person", "private_phone"}
 
 
-# README 分類表：召回看標註類別（標註的值整個被換掉才算，任何類型的預測都算）；精確度看輸出類型（換掉的值碰到任何標註就算對）。
-# 機構不算精確度（兩份考題都沒標機構）；bench 的人名兩邊都不算（切分前看過）
+# README 分類表：召回看標註類別（標註的值整個被換掉才算，任何類型的預測都算）；精確率看輸出類型（換掉的值碰到任何標註就算對）。
+# 機構不算精確率（兩份考題都沒標機構）；bench 的人名兩邊都不算（切分前看過）
 GOLD_CAT = {"P": "人名", **dict.fromkeys(("ID", "tw_national_id", "tw_passport"), "身分證、居留證、護照"),
             **dict.fromkeys(("tw_nhi_card", "tw_driver_license", "tw_household_no", "tw_medical_license", "tw_military_id"), "健保卡、駕照、戶號等證號"),
             **dict.fromkeys(("ACCT", "account_number"), "帳號、卡號"), "tw_company_id": "統一編號", **dict.fromkeys(("SEC", "secret"), "密碼、驗證碼"),
@@ -43,8 +43,8 @@ OUT_CAT = {"PERSON": "人名", "CODE": "英數代碼（身分證、護照、車�
 
 def by_category(golds, masks, skip=(), seen=()):
     """golds：每份 [(起, 訖, 標註類別)]（不含保留的人名）；masks：每份 [(起, 訖, 輸出類型)]（一般模式要換的全部）；
-    skip：不算精確度的輸出類型；seen：開發時看過錯題的標註類別（電話），碰到它的預測不算精確度（只拿掉換對的，偏保守）。
-    回傳 (召回, 精確度)，都是 {類別: [對, 共]}。"""
+    skip：不算精確率的輸出類型；seen：開發時看過錯題的標註類別（電話），碰到它的預測不算精確率（只拿掉換對的，偏保守）。
+    回傳 (召回, 精確率)，都是 {類別: [對, 共]}。"""
     rec, pre = defaultdict(lambda: [0, 0]), defaultdict(lambda: [0, 0])
     for gold, ms in zip(golds, masks):
         for s, e, lab in gold:
@@ -59,16 +59,16 @@ def by_category(golds, masks, skip=(), seen=()):
 
 
 def category_tables(name, cols):
-    """cols：[(欄名, (召回, 精確度))]，印成 README 的 Markdown 表格。"""
+    """cols：[(欄名, (召回, 精確率))]，印成 README 的 Markdown 表格。"""
     pct = lambda d, k: f"{d[k][0] / d[k][1]:.1%}（{d[k][0]}/{d[k][1]}）" if d.get(k, [0, 0])[1] else "—"
-    for title, i, cats in (("召回（該換的值整個換掉）", 0, dict.fromkeys(GOLD_CAT.values())), ("精確度（換掉的值確實是個資）", 1, OUT_CAT.values())):
+    for title, i, cats in (("召回（該換的值整個換掉）", 0, dict.fromkeys(GOLD_CAT.values())), ("精確率（換掉的值確實是個資）", 1, OUT_CAT.values())):
         print(f"\n{name}｜{title}\n| 類別 | " + " | ".join(c for c, _ in cols) + " |\n|---|" + "---|" * len(cols))
         for k in cats:
             if any(x[i].get(k, [0, 0])[1] for _, x in cols):
                 print(f"| {k} | " + " | ".join(pct(x[i], k) for _, x in cols) + " |")
     for c, (_, pre) in cols:
         ok, n = sum(v[0] for v in pre.values()), sum(v[1] for v in pre.values())
-        print(f"→ {name}｜{c}：精確度 " + (f"{ok / n:.1%}（{ok}/{n}）" if n else "—"))  # 只認人名的舊模型在 bench 沒有可計分的預測
+        print(f"→ {name}｜{c}：精確率 " + (f"{ok / n:.1%}（{ok}/{n}）" if n else "—"))  # 只認人名的舊模型在 bench 沒有可計分的預測
 
 
 def load_bench():
