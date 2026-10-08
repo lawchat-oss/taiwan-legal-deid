@@ -66,9 +66,12 @@ def category_tables(name, cols):
         for k in cats:
             if any(x[i].get(k, [0, 0])[1] for _, x in cols):
                 print(f"| {k} | " + " | ".join(pct(x[i], k) for _, x in cols) + " |")
-    for c, (_, pre) in cols:
-        ok, n = sum(v[0] for v in pre.values()), sum(v[1] for v in pre.values())
-        print(f"→ {name}｜{c}：精確率 " + (f"{ok / n:.1%}（{ok}/{n}）" if n else "—"))  # 只認人名的舊模型在 bench 沒有可計分的預測
+    tot = lambda d: (sum(v[0] for k, v in d.items() if not k.startswith("電話")), sum(v[1] for k, v in d.items() if not k.startswith("電話")))
+    for c, (rec, pre) in cols:  # 總計不含電話（開發時看過錯題）
+        (pk, pn), (rk, rn) = tot(pre), tot(rec)
+        f1 = "—" if not (pn and rn) else f"{2 * pk * rk / (pk * rn + rk * pn) if pk and rk else 0:.1%}"  # 2PR/(P+R)；沒有可計分的才是「—」
+        print(f"→ {name}｜{c}：精確率 " + (f"{pk / pn:.1%}（{pk}/{pn}）" if pn else "—")  # 只認人名的舊模型在 bench 沒有可計分的預測
+              + "；召回率 " + (f"{rk / rn:.1%}（{rk}/{rn}）" if rn else "—") + f"；F1 {f1}")
 
 
 def load_bench():
